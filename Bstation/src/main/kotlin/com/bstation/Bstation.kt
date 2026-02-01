@@ -6,8 +6,8 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.jsoup.nodes.Element
+import android.util.Base64
 
-@Suppress("DEPRECATION")
 class Bstation : MainAPI() {
     override var mainUrl = "https://www.bilibili.tv"
     override var name = "Bstation"
@@ -39,39 +39,33 @@ class Bstation : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // Fallback to HTML parsing as API is unstable
         val targetUrl = if(request.data == "trending") "$mainUrl/id/trending" else "$mainUrl/id/anime"
         
         val document = app.get(targetUrl, headers = headers, cookies = cookies).document
         
         val items = document.select("a[href*='/play/']").mapNotNull { element ->
              val href = element.attr("href")
-             // Extract ID from /play/2288932 or /play/2288932?param=...
              val id = href.substringAfter("/play/").substringBefore("?").filter { it.isDigit() }
              if (id.isEmpty()) return@mapNotNull null
              
-             // Extract Title
              var title = element.text()
              if (title.isBlank()) {
                  title = element.select("h3, p, div[class*='title']").text()
              }
              if (title.isBlank()) title = "Unknown Title"
 
-             // Extract Poster
              var poster = element.select("img").attr("src")
              if (poster.isEmpty()) poster = element.select("img").attr("data-src")
-             if (poster.isEmpty()) poster = element.select("img").attr("alt") // sometimes src is blocked, fallback? No.
              
              newAnimeSearchResponse(title, id, TvType.Anime) {
                  this.posterUrl = poster
              }
-        }.distinctBy { it.url } // Dedup
+        }.distinctBy { it.url }
 
         return newHomePageResponse(request.name, items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        // Try V2 Search API
         val url = "$apiUrl/intl/gateway/web/v2/search_result?keyword=$query&s_locale=id_ID&limit=20"
         return try {
             val res = app.get(url, headers = headers, cookies = cookies).parsedSafe<SearchResult>()
@@ -128,7 +122,6 @@ class Bstation : MainAPI() {
         }
     }
 
-    @Suppress("DEPRECATION")
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -138,35 +131,55 @@ class Bstation : MainAPI() {
         val loadData = parseJson<LoadData>(data)
         val epId = loadData.epId
         
-        // FLV Strategy: fnval=0 forces legacy format with merged audio+video
-        val playUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=80&fnval=0&s_locale=id_ID"
+        // Request DASH streams
+        val playUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&s_locale=id_ID"
         val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<PlayResult>()
         val playResult = res?.result ?: res?.data ?: return false
 
-        // PRIORITY 1: Handle legacy durl format (Merged Audio+Video)
-        playResult.durl?.forEach { durl ->
-            val videoUrl = durl.url ?: return@forEach
-            callback.invoke(
-                newExtractorLink(this.name, "$name MP4", videoUrl, INFER_TYPE) {
-                    this.referer = "$mainUrl/"
-                    this.quality = Qualities.P720.value
-                }
-            )
-        }
+        // Get video streams
+        val videoInfo = playResult.videoInfo
+        val streamList = videoInfo?.streamList ?: emptyList()
+        val dashAudio = videoInfo?.dashAudio ?: emptyList()
+        val duration = videoInfo?.timelength ?: 0
 
-        // PRIORITY 2: Handle DASH video streams (Fallback, may lack audio)
-        val streams = playResult.videoInfo?.streamList ?: playResult.dash?.video ?: emptyList()
-        
-        streams.forEach { stream ->
-            val quality = stream.streamInfo?.displayDesc ?: "${stream.height ?: 0}p"
-            val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
-            
-            callback.invoke(
-                newExtractorLink(this.name, "$name $quality (No Audio)", videoUrl, INFER_TYPE) {
-                    this.referer = "$mainUrl/"
-                    this.quality = getQualityFromName(quality)
-                }
-            )
+        // Get first available audio URL
+        val audioUrl = dashAudio.firstOrNull()?.baseUrl
+
+        // Process each quality
+        for (stream in streamList) {
+            val quality = stream.streamInfo?.displayDesc ?: continue
+            val videoUrl = stream.dashVideo?.baseUrl
+            if (videoUrl.isNullOrEmpty()) continue
+
+            // If we have both video and audio, create a DASH manifest
+            if (audioUrl != null) {
+                val manifest = generateDashManifest(videoUrl, audioUrl, duration)
+                val manifestDataUri = "data:application/dash+xml;base64," + 
+                    Base64.encodeToString(manifest.toByteArray(), Base64.NO_WRAP)
+                
+                callback.invoke(
+                    ExtractorLink(
+                        source = this.name,
+                        name = "$name $quality",
+                        url = manifestDataUri,
+                        referer = "$mainUrl/",
+                        quality = getQualityFromName(quality),
+                        type = INFER_TYPE
+                    )
+                )
+            } else {
+                // Fallback: video only
+                callback.invoke(
+                    ExtractorLink(
+                        source = this.name,
+                        name = "$name $quality (No Audio)",
+                        url = videoUrl,
+                        referer = "$mainUrl/",
+                        quality = getQualityFromName(quality),
+                        type = INFER_TYPE
+                    )
+                )
+            }
         }
 
         // Fetch subtitles
@@ -178,45 +191,69 @@ class Bstation : MainAPI() {
             subRes?.result?.episodes?.let { allEps.addAll(it) }
             subRes?.result?.modules?.forEach { m -> m.data?.episodes?.let { allEps.addAll(it) } }
             
-            allEps.find { it.id.toString() == epId }?.subtitles?.forEach { sub ->
-                val lang = sub.lang ?: sub.title ?: "Unknown"
-                val sUrl = sub.url ?: return@forEach
-                subtitleCallback.invoke(SubtitleFile(lang, sUrl))
+            val currentEp = allEps.find { it.id.toString() == epId }
+            currentEp?.subtitles?.forEach { sub ->
+                val subUrl = sub.url ?: return@forEach
+                subtitleCallback.invoke(
+                    SubtitleFile(sub.title ?: sub.lang ?: "Unknown", subUrl)
+                )
             }
-        } catch (_: Exception) { }
+        } catch (_: Exception) {}
 
         return true
     }
 
-    data class LoadData(val epId: String, val seasonId: String)
+    private fun generateDashManifest(videoUrl: String, audioUrl: String, durationMs: Long): String {
+        val durationSec = durationMs / 1000
+        val hours = durationSec / 3600
+        val minutes = (durationSec % 3600) / 60
+        val seconds = durationSec % 60
+        val durationStr = "PT${hours}H${minutes}M${seconds}S"
 
-    // Search Response Classes
+        return """<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="$durationStr" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
+  <Period duration="$durationStr">
+    <AdaptationSet mimeType="video/mp4" contentType="video">
+      <Representation id="video" bandwidth="500000">
+        <BaseURL>$videoUrl</BaseURL>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" contentType="audio" lang="und">
+      <Representation id="audio" bandwidth="128000">
+        <BaseURL>$audioUrl</BaseURL>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>"""
+    }
+
+    // Data Classes
+    data class LoadData(val epId: String, val seasonId: String)
+    
     data class SearchResult(@JsonProperty("data") val data: SearchData?)
-    data class SearchData(@JsonProperty("modules") val modules: List<Module>?)
-    data class Module(@JsonProperty("data") val data: ModuleData?)
-    data class ModuleData(
-        @JsonProperty("items") val items: List<SearchItem>?,
-        @JsonProperty("episodes") val episodes: List<EpisodeData>?
-    )
+    data class SearchData(@JsonProperty("modules") val modules: List<SearchModule>?)
+    data class SearchModule(@JsonProperty("data") val data: SearchModuleData?)
+    data class SearchModuleData(@JsonProperty("items") val items: List<SearchItem>?)
     data class SearchItem(
         @JsonProperty("title") val title: String?,
-        @JsonProperty("cover") val cover: String?,
-        @JsonProperty("season_id") val seasonId: String?
+        @JsonProperty("season_id") val seasonId: String?,
+        @JsonProperty("cover") val cover: String?
     )
 
-    // Season Response Classes
     data class SeasonResult(@JsonProperty("result") val result: SeasonData?)
     data class SeasonData(
         @JsonProperty("title") val title: String?,
         @JsonProperty("cover") val cover: String?,
         @JsonProperty("evaluate") val evaluate: String?,
-        @JsonProperty("modules") val modules: List<Module>?,
-        @JsonProperty("episodes") val episodes: List<EpisodeData>?
+        @JsonProperty("episodes") val episodes: List<EpisodeData>?,
+        @JsonProperty("modules") val modules: List<ModuleData>?
     )
+    data class ModuleData(@JsonProperty("data") val data: ModuleEpisodes?)
+    data class ModuleEpisodes(@JsonProperty("episodes") val episodes: List<EpisodeData>?)
     data class EpisodeData(
         @JsonProperty("id") val id: Long?,
         @JsonProperty("title") val title: String?,
-        @JsonProperty("index") val index: String?,
+        @JsonProperty("index_show") val index: String?,
         @JsonProperty("cover") val cover: String?,
         @JsonProperty("subtitles") val subtitles: List<SubtitleData>?
     )
@@ -236,18 +273,30 @@ class Bstation : MainAPI() {
         @JsonProperty("dash") val dash: DashData?,
         @JsonProperty("durl") val durl: List<DurlData>?
     )
-    data class VideoInfo(@JsonProperty("stream_list") val streamList: List<StreamData>?)
+    data class VideoInfo(
+        @JsonProperty("stream_list") val streamList: List<StreamData>?,
+        @JsonProperty("dash_audio") val dashAudio: List<DashAudioData>?,
+        @JsonProperty("timelength") val timelength: Long?
+    )
     data class DashData(
         @JsonProperty("video") val video: List<StreamData>?,
         @JsonProperty("audio") val audio: List<StreamData>?
     )
     data class StreamData(
         @JsonProperty("base_url") val baseUrl: String?,
-        @JsonProperty("dash_video") val dashVideo: BaseUrlData?,
+        @JsonProperty("dash_video") val dashVideo: DashVideoData?,
         @JsonProperty("height") val height: Int?,
         @JsonProperty("stream_info") val streamInfo: StreamInfo?
     )
-    data class BaseUrlData(@JsonProperty("base_url") val baseUrl: String?)
+    data class DashVideoData(
+        @JsonProperty("base_url") val baseUrl: String?,
+        @JsonProperty("audio_id") val audioId: Int?
+    )
+    data class DashAudioData(
+        @JsonProperty("id") val id: Int?,
+        @JsonProperty("base_url") val baseUrl: String?,
+        @JsonProperty("bandwidth") val bandwidth: Int?
+    )
     data class StreamInfo(@JsonProperty("display_desc") val displayDesc: String?)
     data class DurlData(@JsonProperty("url") val url: String?)
 }
