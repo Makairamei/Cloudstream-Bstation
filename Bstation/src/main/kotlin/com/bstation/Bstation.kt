@@ -28,9 +28,9 @@ class Bstation : MainAPI() {
     )
 
     private val headers = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
-        "Referer" to "https://m.bilibili.tv/",
-        "Origin" to "https://m.bilibili.tv"
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+        "Referer" to "https://www.bilibili.tv/",
+        "Origin" to "https://www.bilibili.tv"
     )
 
     override val mainPage = mainPageOf(
@@ -138,12 +138,23 @@ class Bstation : MainAPI() {
         val loadData = parseJson<LoadData>(data)
         val epId = loadData.epId
         
-        // HLS Strategy: platform=h5 usually returns .m3u8 which includes Audio
-        val playUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=h5&qn=64&type=m3u8&s_locale=id_ID"
+        // FLV Strategy: fnval=0 forces legacy format with merged audio+video
+        val playUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=80&fnval=0&s_locale=id_ID"
         val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<PlayResult>()
         val playResult = res?.result ?: res?.data ?: return false
 
-        // Handle video streams
+        // PRIORITY 1: Handle legacy durl format (Merged Audio+Video)
+        playResult.durl?.forEach { durl ->
+            val videoUrl = durl.url ?: return@forEach
+            callback.invoke(
+                newExtractorLink(this.name, "$name MP4", videoUrl, INFER_TYPE) {
+                    this.referer = "$mainUrl/"
+                    this.quality = Qualities.P720.value
+                }
+            )
+        }
+
+        // PRIORITY 2: Handle DASH video streams (Fallback, may lack audio)
         val streams = playResult.videoInfo?.streamList ?: playResult.dash?.video ?: emptyList()
         
         streams.forEach { stream ->
@@ -151,20 +162,9 @@ class Bstation : MainAPI() {
             val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
             
             callback.invoke(
-                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                newExtractorLink(this.name, "$name $quality (No Audio)", videoUrl, INFER_TYPE) {
                     this.referer = "$mainUrl/"
                     this.quality = getQualityFromName(quality)
-                }
-            )
-        }
-
-        // Handle legacy durl format
-        playResult.durl?.forEach { durl ->
-            val videoUrl = durl.url ?: return@forEach
-            callback.invoke(
-                newExtractorLink(this.name, "$name Legacy", videoUrl, INFER_TYPE) {
-                    this.referer = "$mainUrl/"
-                    this.quality = Qualities.Unknown.value
                 }
             )
         }
