@@ -7,6 +7,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.jsoup.nodes.Element
 
+@Suppress("DEPRECATION")
 class Bstation : MainAPI() {
     override var mainUrl = "https://www.bilibili.tv"
     override var name = "Bstation"
