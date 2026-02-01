@@ -158,26 +158,18 @@ class Bstation : MainAPI() {
                     Base64.encodeToString(manifest.toByteArray(), Base64.NO_WRAP)
                 
                 callback.invoke(
-                    ExtractorLink(
-                        source = this.name,
-                        name = "$name $quality",
-                        url = manifestDataUri,
-                        referer = "$mainUrl/",
-                        quality = getQualityFromName(quality),
-                        type = INFER_TYPE
-                    )
+                    newExtractorLink(this.name, "$name $quality", manifestDataUri, INFER_TYPE) {
+                        this.referer = "$mainUrl/"
+                        this.quality = getQualityFromName(quality)
+                    }
                 )
             } else {
                 // Fallback: video only
                 callback.invoke(
-                    ExtractorLink(
-                        source = this.name,
-                        name = "$name $quality (No Audio)",
-                        url = videoUrl,
-                        referer = "$mainUrl/",
-                        quality = getQualityFromName(quality),
-                        type = INFER_TYPE
-                    )
+                    newExtractorLink(this.name, "$name $quality (No Audio)", videoUrl, INFER_TYPE) {
+                        this.referer = "$mainUrl/"
+                        this.quality = getQualityFromName(quality)
+                    }
                 )
             }
         }
