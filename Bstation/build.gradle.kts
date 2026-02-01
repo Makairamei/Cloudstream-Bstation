@@ -7,6 +7,6 @@ cloudstream {
     isCrossPlatform = true
     status = 1
     tvTypes = listOf(
-        "Movie", "TvSeries"
+        "Movie", "TvSeries", "Anime"
     )
 }

@@ -1,84 +1,136 @@
 package com.bstation
 
-import com.fasterxml.jackson.annotation.JsonProperty
+import com.lagradost.api.Log
+import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
+import com.lagradost.cloudstream3.LoadResponse.Companion.addScore
+import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
+import java.net.URI
 
 class Bstation : MainAPI() {
+
     override var mainUrl = "https://www.bilibili.tv"
     override var name = "Bstation"
     override val hasMainPage = true
     override var lang = "id"
     override val hasDownloadSupport = true
-    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
+    override val supportedTypes = setOf(TvType.Movie, TvType.Anime, TvType.Cartoon)
 
-    private val apiUrl = "https://api.bilibili.tv"
-
-    private val cookies = mapOf(
-        "SESSDATA" to "77adc14d%2C1784135329%2C49214%2A110091",
-        "bili_jct" to "b9cd1b814e7484becba8917728142c21",
-        "DedeUserID" to "1709563281",
-        "bstar-web-lang" to "id"
+    override val mainPage = mainPageOf(
+        "movies" to "Latest Movies",
+        "series" to "TV Series",
+        "most-rating" to "Most Rating Movies",
+        "top-imdb" to "Top IMDB Movies",
+        "country/malaysia" to "Malaysia Movies",
+        "country/indonesia" to "Indonesia Movies",
+        "country/india" to "India Movies",
+        "country/japan" to "Japan Movies",
+        "country/thailand" to "Thailand Movies",
+        "country/china" to "China Movies",
     )
 
-    private val headers = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer" to "https://www.bilibili.tv/"
-    )
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val document = app.get("$mainUrl/${request.data}/page/$page", timeout = 50L).document
+        val home = document.select("div.ml-item").mapNotNull { it.toSearchResult() }
+
+        return newHomePageResponse(
+            list = HomePageList(
+                name = request.name,
+                list = home,
+                isHorizontalImages = false
+            ),
+            hasNext = true
+        )
+    }
+
+    private fun Element.toSearchResult(): SearchResponse {
+        val title = this.select("a").attr("oldtitle").substringBefore("(")
+        val href = fixUrl(this.select("a").attr("href"))
+        val posterUrl = fixUrlNull(this.select("a img").attr("data-original").toString())
+		val qualityString = this.selectFirst("span.mli-quality")?.text()?.trim() ?: ""
+		val quality = this.selectFirst("span.mli-quality, div.jtip-quality")?.text()?.trim()?.replace("-", "")?: ""
+		val epsCount = this.selectFirst("span.mli-eps i")?.text()?.trim()?.toIntOrNull()
+		val isSeries = epsCount != null || selectFirst("span.mli-eps") != null
+		
+		return if (isSeries) {
+			newAnimeSearchResponse(title, href, TvType.TvSeries) {
+				this.posterUrl = posterUrl
+				addQuality(quality)
+				if (epsCount != null) addSub(epsCount)
+			}
+		} else {
+			newMovieSearchResponse(title, href, TvType.Movie) {
+				this.posterUrl = posterUrl
+				addQuality(quality)
+			}
+		}
+    }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$apiUrl/intl/gateway/v2/ogv/search/resource?keyword=$query&s_locale=id_ID&limit=20"
-        val res = app.get(url, headers = headers, cookies = cookies).parsedSafe<SearchResult>()
-        
-        return res?.data?.modules?.flatMap { module ->
-            module.data?.items?.mapNotNull { item ->
-                val title = item.title ?: return@mapNotNull null
-                val id = item.seasonId ?: return@mapNotNull null
-                newMovieSearchResponse(title, id, TvType.TvSeries) {
-                    this.posterUrl = item.cover
-                }
-            } ?: emptyList()
-        } ?: emptyList()
+        val document = app.get("${mainUrl}?s=$query", timeout = 50L).document
+        return document.select("div.ml-item").mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val seasonId = url.substringAfterLast("/").filter { it.isDigit() }.ifEmpty { url }
-        val seasonApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/season?season_id=$seasonId&platform=web&s_locale=id_ID"
-        val res = app.get(seasonApiUrl, headers = headers, cookies = cookies).parsedSafe<SeasonResult>()
-            ?: throw ErrorLoadingException("Failed to load")
+        val document = app.get(url, timeout = 50L).document
 
-        val result = res.result ?: throw ErrorLoadingException("No result")
-        val title = result.title ?: "Unknown"
-        val poster = result.cover
-        val description = result.evaluate
+        val title = document.selectFirst("div.mvic-desc h3")?.text()?.trim().toString().substringBefore("(")
+        val poster = document.select("meta[property=og:image]").attr("content").toString()
+        val description = document.selectFirst("div.desc p.f-desc")?.text()?.trim()
+        val tvtag = if (url.contains("series")) TvType.TvSeries else TvType.Movie
+        val trailer = document.select("meta[itemprop=embedUrl]").attr("content") ?: ""
+        val genre = document.select("div.mvic-info p:contains(Genre)").select("a").map { it.text() }
+        val rating = document.selectFirst("span.imdb-r[itemprop=ratingValue]")?.text()?.toDoubleOrNull()
+        val duration = document.selectFirst("span[itemprop=duration]")?.text()?.replace(Regex("\\D"), "")?.toIntOrNull()
+        val actors = document.select("div.mvic-info p:contains(Actors)").select("a").map { it.text() }
+        val year = document.select("div.mvic-info p:contains(Release)").select("a").text().toIntOrNull()
+        val recommendation = document.select("div.ml-item").mapNotNull { it.toSearchResult() }
 
-        val episodes = mutableListOf<Episode>()
-        
-        result.modules?.forEach { module ->
-            module.data?.episodes?.forEach { ep ->
-                episodes.add(newEpisode(LoadData(ep.id.toString(), seasonId).toJson()) {
-                    this.name = ep.title ?: "Episode ${ep.index}"
-                    this.episode = ep.index?.toIntOrNull()
-                    this.posterUrl = ep.cover
-                })
+        return if (tvtag == TvType.TvSeries) {
+            val episodes = mutableListOf<Episode>()
+            document.select("div.tvseason").amap { info ->
+                val season = info.select("strong").text().substringAfter("Season").trim().toIntOrNull()
+                info.select("div.les-content a").forEach { it ->
+                    val name = it.select("a").text().substringAfter("-").trim()
+                    val href = it.select("a").attr("href") ?: ""
+                    val Rawepisode = it.select("a").text().substringAfter("Episode").substringBefore("-").trim().toIntOrNull()
+                    episodes.add(
+                        newEpisode(href) {
+                            this.episode = Rawepisode
+                            this.name = name
+                            this.season = season
+							this.posterUrl = poster
+                        }
+                    )
+                }
             }
-        }
 
-        result.episodes?.forEach { ep ->
-            if (episodes.none { parseJson<LoadData>(it.data).epId == ep.id.toString() }) {
-                episodes.add(newEpisode(LoadData(ep.id.toString(), seasonId).toJson()) {
-                    this.name = ep.title ?: "Episode ${ep.index}"
-                    this.episode = ep.index?.toIntOrNull()
-                    this.posterUrl = ep.cover
-                })
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = poster
+                this.plot = description
+                this.tags = genre
+                this.year = year
+                addTrailer(trailer)
+                addActors(actors)
+                this.recommendations = recommendation
+                this.duration = duration ?: 0
+                if (rating != null) addScore(rating.toString(), 10)
             }
-        }
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-            this.posterUrl = poster
-            this.plot = description
+        } else {
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = poster
+                this.plot = description
+                this.tags = genre
+                this.year = year
+                addTrailer(trailer)
+                addActors(actors)
+                this.recommendations = recommendation
+                this.duration = duration ?: 0
+                if (rating != null) addScore(rating.toString(), 10)
+            }
         }
     }
 
@@ -88,120 +140,31 @@ class Bstation : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val loadData = parseJson<LoadData>(data)
-        val epId = loadData.epId
-        
-        val playUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID"
-        val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<PlayResult>()
-        val playResult = res?.result ?: res?.data ?: return false
-
-        val streams = playResult.videoInfo?.streamList ?: playResult.dash?.video ?: emptyList()
-        
-        streams.forEach { stream ->
-            val quality = stream.streamInfo?.displayDesc ?: "${stream.height ?: 0}p"
-            val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
-            
-            callback.invoke(
-                ExtractorLink(
-                    this.name,
-                    "$name $quality",
-                    videoUrl,
-                    "$mainUrl/",
-                    getQualityFromName(quality),
-                    false
-                )
-            )
+        val document = app.get(data).document
+        document.select("div.movieplay iframe").forEach {
+            val href = it.attr("data-src")
+			val finalUrl = followRedirect(href)
+            loadExtractor(finalUrl, subtitleCallback, callback)
         }
-
-        playResult.durl?.forEach { durl ->
-            val videoUrl = durl.url ?: return@forEach
-            callback.invoke(
-                ExtractorLink(
-                    this.name,
-                    "$name",
-                    videoUrl,
-                    "$mainUrl/",
-                    Qualities.Unknown.value,
-                    false
-                )
-            )
-        }
-
-        try {
-            val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/season?ep_id=$epId&platform=web&s_locale=id_ID"
-            val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<SeasonResult>()
-            
-            val allEps = mutableListOf<EpisodeData>()
-            subRes?.result?.episodes?.let { allEps.addAll(it) }
-            subRes?.result?.modules?.forEach { m -> m.data?.episodes?.let { allEps.addAll(it) } }
-            
-            allEps.find { it.id.toString() == epId }?.subtitles?.forEach { sub ->
-                val lang = sub.lang ?: sub.title ?: "Unknown"
-                val sUrl = sub.url ?: return@forEach
-                subtitleCallback.invoke(SubtitleFile(lang, sUrl))
-            }
-        } catch (_: Exception) { }
-
         return true
     }
-
-    data class LoadData(val epId: String, val seasonId: String)
-
-    data class SearchResult(@JsonProperty("data") val data: SearchData?)
-    data class SearchData(@JsonProperty("modules") val modules: List<Module>?)
-    data class Module(@JsonProperty("data") val data: ModuleData?)
-    data class ModuleData(
-        @JsonProperty("items") val items: List<SearchItem>?,
-        @JsonProperty("episodes") val episodes: List<EpisodeData>?
-    )
-    data class SearchItem(
-        @JsonProperty("title") val title: String?,
-        @JsonProperty("cover") val cover: String?,
-        @JsonProperty("season_id") val seasonId: String?
-    )
-
-    data class SeasonResult(@JsonProperty("result") val result: SeasonData?)
-    data class SeasonData(
-        @JsonProperty("title") val title: String?,
-        @JsonProperty("cover") val cover: String?,
-        @JsonProperty("evaluate") val evaluate: String?,
-        @JsonProperty("modules") val modules: List<Module>?,
-        @JsonProperty("episodes") val episodes: List<EpisodeData>?
-    )
-    data class EpisodeData(
-        @JsonProperty("id") val id: Long?,
-        @JsonProperty("title") val title: String?,
-        @JsonProperty("index") val index: String?,
-        @JsonProperty("cover") val cover: String?,
-        @JsonProperty("subtitles") val subtitles: List<SubtitleData>?
-    )
-    data class SubtitleData(
-        @JsonProperty("lang") val lang: String?,
-        @JsonProperty("title") val title: String?,
-        @JsonProperty("url") val url: String?
-    )
-
-    data class PlayResult(
-        @JsonProperty("result") val result: PlayData?,
-        @JsonProperty("data") val data: PlayData?
-    )
-    data class PlayData(
-        @JsonProperty("video_info") val videoInfo: VideoInfo?,
-        @JsonProperty("dash") val dash: DashData?,
-        @JsonProperty("durl") val durl: List<DurlData>?
-    )
-    data class VideoInfo(@JsonProperty("stream_list") val streamList: List<StreamData>?)
-    data class DashData(
-        @JsonProperty("video") val video: List<StreamData>?,
-        @JsonProperty("audio") val audio: List<StreamData>?
-    )
-    data class StreamData(
-        @JsonProperty("base_url") val baseUrl: String?,
-        @JsonProperty("dash_video") val dashVideo: BaseUrlData?,
-        @JsonProperty("height") val height: Int?,
-        @JsonProperty("stream_info") val streamInfo: StreamInfo?
-    )
-    data class BaseUrlData(@JsonProperty("base_url") val baseUrl: String?)
-    data class StreamInfo(@JsonProperty("display_desc") val displayDesc: String?)
-    data class DurlData(@JsonProperty("url") val url: String?)
+	
+	suspend fun followRedirect(url: String): String {
+		return try {
+			val resp = app.get(url, allowRedirects = false)
+			val loc = resp.headers["Location"]
+			if (!loc.isNullOrBlank()) {
+				return if (loc.startsWith("http")) loc else url + loc
+			}
+			val doc = resp.document
+			val meta = doc.selectFirst("meta[http-equiv~=(?i)refresh]")?.attr("content")
+			if (!meta.isNullOrBlank()) {
+				val u = meta.substringAfter("URL=", "").trim()
+				if (u.isNotEmpty()) return if (u.startsWith("http")) u else url + u
+			}
+			url
+		} catch (_: Exception) {
+			url
+		}
+	}
 }
