@@ -11,11 +11,11 @@ class Bstation : MainAPI() {
     override var name = "Bstation"
     override val hasMainPage = true
     override var lang = "id"
-    override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie)
+    override val hasDownloadSupport = true
+    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     private val apiUrl = "https://api.bilibili.tv"
 
-    // Hardcoded cookies from user's bstation_module/cookies.txt
     private val cookies = mapOf(
         "SESSDATA" to "77adc14d%2C1784135329%2C49214%2A110091",
         "bili_jct" to "b9cd1b814e7484becba8917728142c21",
@@ -95,7 +95,6 @@ class Bstation : MainAPI() {
         val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<PlayResult>()
         val playResult = res?.result ?: res?.data ?: return false
 
-        // Handle video streams
         val streams = playResult.videoInfo?.streamList ?: playResult.dash?.video ?: emptyList()
         
         streams.forEach { stream ->
@@ -114,13 +113,12 @@ class Bstation : MainAPI() {
             )
         }
 
-        // Handle legacy durl format
         playResult.durl?.forEach { durl ->
             val videoUrl = durl.url ?: return@forEach
             callback.invoke(
                 ExtractorLink(
                     this.name,
-                    "$name Legacy",
+                    "$name",
                     videoUrl,
                     "$mainUrl/",
                     Qualities.Unknown.value,
@@ -129,7 +127,6 @@ class Bstation : MainAPI() {
             )
         }
 
-        // Fetch subtitles
         try {
             val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/season?ep_id=$epId&platform=web&s_locale=id_ID"
             val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<SeasonResult>()
@@ -150,7 +147,6 @@ class Bstation : MainAPI() {
 
     data class LoadData(val epId: String, val seasonId: String)
 
-    // Search Response Classes
     data class SearchResult(@JsonProperty("data") val data: SearchData?)
     data class SearchData(@JsonProperty("modules") val modules: List<Module>?)
     data class Module(@JsonProperty("data") val data: ModuleData?)
@@ -164,7 +160,6 @@ class Bstation : MainAPI() {
         @JsonProperty("season_id") val seasonId: String?
     )
 
-    // Season Response Classes
     data class SeasonResult(@JsonProperty("result") val result: SeasonData?)
     data class SeasonData(
         @JsonProperty("title") val title: String?,
@@ -186,7 +181,6 @@ class Bstation : MainAPI() {
         @JsonProperty("url") val url: String?
     )
 
-    // Play Response Classes
     data class PlayResult(
         @JsonProperty("result") val result: PlayData?,
         @JsonProperty("data") val data: PlayData?
