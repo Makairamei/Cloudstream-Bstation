@@ -1,4 +1,3 @@
-@file:Suppress("DEPRECATION")
 package com.bstation
 
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -148,14 +147,10 @@ class Bstation : MainAPI() {
             val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
             
             callback.invoke(
-                ExtractorLink(
-                    this.name,
-                    "$name $quality",
-                    videoUrl,
-                    "$mainUrl/",
-                    getQualityFromName(quality),
-                    false
-                )
+                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                    this.referer = "$mainUrl/"
+                    this.quality = getQualityFromName(quality)
+                }
             )
         }
 
@@ -163,14 +158,10 @@ class Bstation : MainAPI() {
         playResult.durl?.forEach { durl ->
             val videoUrl = durl.url ?: return@forEach
             callback.invoke(
-                ExtractorLink(
-                    this.name,
-                    "$name Legacy",
-                    videoUrl,
-                    "$mainUrl/",
-                    Qualities.Unknown.value,
-                    false
-                )
+                newExtractorLink(this.name, "$name Legacy", videoUrl, INFER_TYPE) {
+                    this.referer = "$mainUrl/"
+                    this.quality = Qualities.Unknown.value
+                }
             )
         }
 
