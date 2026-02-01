@@ -11,7 +11,7 @@ class Bstation : MainAPI() {
     override var name = "Bstation"
     override val hasMainPage = true
     override var lang = "id"
-    override val supportedTypes = setOf(TvType.Anime, TvType.TvSeries, TvType.Movie)
+    override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie)
 
     private val apiUrl = "https://api.bilibili.tv"
 
@@ -36,7 +36,7 @@ class Bstation : MainAPI() {
             module.data?.items?.mapNotNull { item ->
                 val title = item.title ?: return@mapNotNull null
                 val id = item.seasonId ?: return@mapNotNull null
-                newAnimeSearchResponse(title, id, TvType.Anime) {
+                newMovieSearchResponse(title, id, TvType.TvSeries) {
                     this.posterUrl = item.cover
                 }
             } ?: emptyList()
@@ -76,10 +76,9 @@ class Bstation : MainAPI() {
             }
         }
 
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
+        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = poster
             this.plot = description
-            addEpisodes(DubStatus.Subbed, episodes)
         }
     }
 
@@ -103,18 +102,31 @@ class Bstation : MainAPI() {
             val quality = stream.streamInfo?.displayDesc ?: "${stream.height ?: 0}p"
             val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
             
-            callback(newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                this.referer = "$mainUrl/"
-                this.quality = getQualityFromName(quality)
-            })
+            callback.invoke(
+                ExtractorLink(
+                    this.name,
+                    "$name $quality",
+                    videoUrl,
+                    "$mainUrl/",
+                    getQualityFromName(quality),
+                    false
+                )
+            )
         }
 
         // Handle legacy durl format
         playResult.durl?.forEach { durl ->
             val videoUrl = durl.url ?: return@forEach
-            callback(newExtractorLink(this.name, "$name Legacy", videoUrl, INFER_TYPE) {
-                this.referer = "$mainUrl/"
-            })
+            callback.invoke(
+                ExtractorLink(
+                    this.name,
+                    "$name Legacy",
+                    videoUrl,
+                    "$mainUrl/",
+                    Qualities.Unknown.value,
+                    false
+                )
+            )
         }
 
         // Fetch subtitles
@@ -129,7 +141,7 @@ class Bstation : MainAPI() {
             allEps.find { it.id.toString() == epId }?.subtitles?.forEach { sub ->
                 val lang = sub.lang ?: sub.title ?: "Unknown"
                 val sUrl = sub.url ?: return@forEach
-                subtitleCallback(SubtitleFile(lang, sUrl))
+                subtitleCallback.invoke(SubtitleFile(lang, sUrl))
             }
         } catch (_: Exception) { }
 
