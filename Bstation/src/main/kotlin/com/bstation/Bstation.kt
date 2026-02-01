@@ -19,6 +19,11 @@ class Bstation : MainAPI() {
     private val apiUrl = "https://api.bilibili.tv"
 
     private val cookies = mapOf(
+        "SESSDATA" to "77adc14d%2C1784135329%2C49214%2A110091",
+        "bili_jct" to "b9cd1b814e7484becba8917728142c21",
+        "DedeUserID" to "1709563281",
+        "buvid3" to "1d09ce3a-0767-40d7-b74a-cb7be2294d8064620infoc",
+        "buvid4" to "EDD5D20E-2881-5FC4-ACF3-38407A33613880170-026011701-uQai4h5eTsQ9YIdcmk0IhA%3D%3D",
         "bstar-web-lang" to "id"
     )
 
