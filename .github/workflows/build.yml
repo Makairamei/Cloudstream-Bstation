@@ -27,35 +27,19 @@ jobs:
       - name: Build Extensions
         run: ./gradlew make
 
-      - name: Checkout Builds Branch
-        uses: actions/checkout@v3
-        with:
-          ref: builds
-          path: builds
-        continue-on-error: true
-
-      - name: Create Builds Branch if Missing
-        if: failure()
+      - name: Deploy to Builds Branch
         run: |
-          mkdir builds
-          cd builds
+          mkdir deploy_git
+          cd deploy_git
           git init
-          git checkout -b builds
-          git remote add origin https://github.com/${{ github.repository }}.git
-
-      - name: Copy Build Artifacts
-        run: |
-          mkdir -p builds
-          cp */build/*.cs3 builds/ 2>/dev/null || true
-          
-      - name: Generate Repo Manifest
-        run: python3 create_repo.py
-
-      - name: Push to Builds Branch
-        working-directory: builds
-        run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
+          git checkout -b builds
+          
+          # Copy artifacts from parent dir
+          cp -r ../builds/* .
+          
           git add .
-          git commit -m "Build extensions" || exit 0
-          git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git builds --force
+          git commit -m "Deploy build artifacts"
+          git remote add origin https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git push origin builds --force
