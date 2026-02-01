@@ -45,18 +45,12 @@ jobs:
 
       - name: Copy Build Artifacts
         run: |
-          # Copy .cs3 and .json files to builds directory
+          mkdir -p builds
           cp */build/*.cs3 builds/ 2>/dev/null || true
           
-          # Generate repo.json (Simple version if not via gradle)
-          # Note: Cloudstream gradle plugin usually generates plugins.json or similar.
-          # We'll trust the gradle make command to have done some work, 
-          # but usually we need a specifically crafted repo.json.
-          # For simplicity let's rely on what 'make' produces or just the raw files.
-          
-          # Actually, the standard 'make' task in Cloudstream template generates the .cs3
-          # We need to organize them.
-          
+      - name: Generate Repo Manifest
+        run: python3 create_repo.py
+
       - name: Push to Builds Branch
         working-directory: builds
         run: |
