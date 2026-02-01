@@ -8,7 +8,8 @@ def generate_repo():
     github_repo = os.environ.get("GITHUB_REPOSITORY", "Makairamei/Cloudstream-Bstation")
     base_url = f"https://raw.githubusercontent.com/{github_repo}/builds"
     
-    output_dir = "builds"
+    # When running inside deploy_git, the files are in "."
+    output_dir = "."
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 

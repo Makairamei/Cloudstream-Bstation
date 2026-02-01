@@ -27,18 +27,28 @@ jobs:
       - name: Build Extensions
         run: ./gradlew make
 
+      - name: Prepare Artifacts for Deploy
+        run: |
+          mkdir -p deploy_git
+          
+          # 1. Copy .cs3 files from build outputs
+          find . -name "*.cs3" -exec cp {} deploy_git/ \;
+          
+          # 2. Run generator script inside the deploy folder
+          # We need to move the script there or run it pointing there?
+          # Easier: copy script there and run it.
+          cp create_repo.py deploy_git/
+          cd deploy_git
+          python3 create_repo.py
+          rm create_repo.py # Clean up script
+
       - name: Deploy to Builds Branch
         run: |
-          mkdir deploy_git
           cd deploy_git
           git init
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git checkout -b builds
-          
-          # Copy artifacts from parent dir
-          cp -r ../builds/* .
-          
           git add .
           git commit -m "Deploy build artifacts"
           git remote add origin https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
