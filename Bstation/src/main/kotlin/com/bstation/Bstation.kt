@@ -19,14 +19,11 @@ class Bstation : MainAPI() {
     private val apiUrl = "https://api.bilibili.tv"
 
     private val cookies = mapOf(
-        "SESSDATA" to "77adc14d%2C1784135329%2C49214%2A110091",
-        "bili_jct" to "b9cd1b814e7484becba8917728142c21",
-        "DedeUserID" to "1709563281",
         "bstar-web-lang" to "id"
     )
 
     private val headers = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
         "Referer" to "https://www.bilibili.tv/"
     )
 
@@ -135,7 +132,7 @@ class Bstation : MainAPI() {
         val loadData = parseJson<LoadData>(data)
         val epId = loadData.epId
         
-        val playUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID"
+        val playUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=android&qn=64&fnval=1&s_locale=id_ID"
         val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<PlayResult>()
         val playResult = res?.result ?: res?.data ?: return false
 
