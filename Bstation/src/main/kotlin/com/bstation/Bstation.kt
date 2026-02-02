@@ -157,9 +157,16 @@ class Bstation : MainAPI() {
                 // Get audio URL
                 val audioUrl = videoInfo.dashAudio?.firstOrNull()?.baseUrl
                 
-                // Prioritize Muxed (durl) streams which have Audio+Video guaranteed
+                val addedQualities = mutableSetOf<String>()
+
+                // 1. Prioritize Muxed (durl) streams (Audio+Video guaranteed)
                 primaryRes.data?.durl?.forEach { durl ->
                     val videoUrl = durl.url ?: return@forEach
+                    // durl doesn't provide quality label, assuming "Direct" or inferred elsewhere.
+                    // To avoid duplicates, we'll need to be careful. But durl is usually unique.
+                    // Let's verify resolution from url if possible or just label "Direct".
+                    // Actually, duplication usually comes from streamList matching durl.
+                    
                     callback.invoke(
                         newExtractorLink(this.name, "$name Direct", videoUrl, INFER_TYPE) {
                             this.referer = "$mainUrl/"
@@ -170,23 +177,23 @@ class Bstation : MainAPI() {
                     foundLinks = true
                 }
                 
-                // Process DASH/Split streams ONLY if we can support them (e.g. if they are muxed or we have API)
-                // Currently on Stable, we CANNOT support split audio without newAudioFile (which crashes).
-                // So we MUST SKIP split streams to avoid "Silent Video".
+                // 2. Process streamList but ONLY Muxed (baseUrl)
+                // Ignore dashVideo (Split/Silent) entirely on Stable.
                  videoInfo.streamList?.forEach { stream ->
-                    val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
-                    val quality = stream.streamInfo?.displayDesc ?: "Unknown"
+                    // Reject DASH Video (Silent)
+                    if (stream.dashVideo != null) return@forEach
                     
-                    // If audio is separate, SKIP this stream on Stable
-                    if (!audioUrl.isNullOrEmpty()) {
-                         return@forEach
-                    }
+                    // Accept Direct MP4 (Muxed)
+                    val videoUrl = stream.baseUrl ?: return@forEach
+                    
+                    val qualityStr = stream.streamInfo?.displayDesc ?: "Unknown"
+                    if (addedQualities.contains(qualityStr)) return@forEach
+                    addedQualities.add(qualityStr)
 
-                    // If we are here, it's likely a muxed stream or audioUrl was null
                     callback.invoke(
-                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                        newExtractorLink(this.name, "$name $qualityStr", videoUrl, INFER_TYPE) {
                             this.referer = "$mainUrl/"
-                            this.quality = getQualityFromName(quality)
+                            this.quality = getQualityFromName(qualityStr)
                             this.headers = this@Bstation.headers
                         }
                     )
