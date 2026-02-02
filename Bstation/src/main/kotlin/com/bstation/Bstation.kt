@@ -1,5 +1,7 @@
 package com.bstation
 
+import java.io.File
+
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
@@ -268,7 +270,7 @@ class Bstation : MainAPI() {
             } catch (_: Exception) {}
         }
 
-        // Fetch subtitles and convert JSON to SRT
+        // Fetch subtitles and convert JSON to SRT (using File Cache)
         try {
             val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/episode?ep_id=$epId&platform=web&s_locale=id_ID"
             val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<EpisodeResult>()
@@ -283,15 +285,21 @@ class Bstation : MainAPI() {
                     val srtContent = convertJsonToSrt(jsonSubtitle)
                     
                     if (srtContent.isNotEmpty()) {
-                        // Create data URI for SRT content - use java.util.Base64
-                        val base64Content = java.util.Base64.getEncoder().encodeToString(
-                            srtContent.toByteArray(Charsets.UTF_8)
-                        )
-                        val srtDataUri = "data:text/plain;charset=utf-8;base64,$base64Content"
-                        subtitleCallback.invoke(SubtitleFile(subTitle, srtDataUri))
+                        // Save to temporary file to avoid Data URI size limits
+                        try {
+                            // Unique filename: bstation_sub_[uniqueId]
+                            val uniqueId = "${epId}_${subUrl.hashCode()}"
+                            val tempFile = File.createTempFile("bstation_sub_${uniqueId}_", ".srt")
+                            tempFile.writeText(srtContent)
+                            
+                            subtitleCallback.invoke(SubtitleFile(subTitle, tempFile.toURI().toString()))
+                        } catch (e: Exception) {
+                            // Fallback to original URL if file write fails
+                            subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
+                        }
                     }
                 } catch (e: Exception) {
-                    // Fallback: try using original URL directly
+                    // Fallback to original URL
                     subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
                 }
             }
