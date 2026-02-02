@@ -243,7 +243,6 @@ class Bstation : MainAPI() {
                 // Original JSON URL only (No conversion)
                 subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
             }
-            }
         } catch (_: Exception) {}
 
         return foundLinks
