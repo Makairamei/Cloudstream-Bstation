@@ -154,21 +154,39 @@ class Bstation : MainAPI() {
         val playurl = res?.data?.playurl
         
         if (playurl == null) {
-            // Fallback to old API
+            // Fallback to old API (bilibili.tv)
             val oldPlayUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID"
             val oldRes = app.get(oldPlayUrl, headers = headers, cookies = cookies).parsedSafe<OldPlayResult>()
+            
+            // Get audio from fallback API
+            val fallbackAudioUrl = oldRes?.result?.videoInfo?.dashAudio?.firstOrNull()?.baseUrl
             
             oldRes?.result?.videoInfo?.streamList?.forEach { stream ->
                 val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
                 val quality = stream.streamInfo?.displayDesc ?: "Unknown"
                 
-                callback.invoke(
-                    newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                        this.referer = "$mainUrl/"
-                        this.quality = getQualityFromName(quality)
-                        this.headers = this@Bstation.headers
-                    }
-                )
+                try {
+                    val audioFiles = if (!fallbackAudioUrl.isNullOrEmpty()) {
+                        listOf(newAudioFile(fallbackAudioUrl) {})
+                    } else emptyList()
+                    
+                    callback.invoke(
+                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                            this.referer = "$mainUrl/"
+                            this.quality = getQualityFromName(quality)
+                            this.headers = this@Bstation.headers
+                            if (audioFiles.isNotEmpty()) this.audioTracks = audioFiles
+                        }
+                    )
+                } catch (e: Exception) {
+                    callback.invoke(
+                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                            this.referer = "$mainUrl/"
+                            this.quality = getQualityFromName(quality)
+                            this.headers = this@Bstation.headers
+                        }
+                    )
+                }
             }
             
             oldRes?.result?.durl?.forEach { durl ->
@@ -306,7 +324,11 @@ class Bstation : MainAPI() {
         @JsonProperty("video_info") val videoInfo: OldVideoInfo?,
         @JsonProperty("durl") val durl: List<OldDurl>?
     )
-    data class OldVideoInfo(@JsonProperty("stream_list") val streamList: List<OldStream>?)
+    data class OldVideoInfo(
+        @JsonProperty("stream_list") val streamList: List<OldStream>?,
+        @JsonProperty("dash_audio") val dashAudio: List<OldDashAudio>?
+    )
+    data class OldDashAudio(@JsonProperty("base_url") val baseUrl: String?)
     data class OldStream(
         @JsonProperty("stream_info") val streamInfo: OldStreamInfo?,
         @JsonProperty("dash_video") val dashVideo: OldDashVideo?,
