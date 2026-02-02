@@ -281,7 +281,8 @@ class Bstation : MainAPI() {
                 
                 try {
                     // Fetch JSON subtitle and convert to SRT
-                    val jsonSubtitle = app.get(subUrl, headers = headers).parsedSafe<BiliSubtitleJson>()
+                    // IMPORTANT: Do NOT send headers/cookies to CDN, strict CORS/Auth might block it
+                    val jsonSubtitle = app.get(subUrl).parsedSafe<BiliSubtitleJson>()
                     val srtContent = convertJsonToSrt(jsonSubtitle)
                     
                     if (srtContent.isNotEmpty()) {
@@ -303,6 +304,14 @@ class Bstation : MainAPI() {
                     subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
                 }
             }
+        } catch (_: Exception) {}
+
+        // Add Debug Subtitle Track (to verify file cache system)
+        try {
+            val debugContent = "1\n00:00:00,000 --> 00:00:05,000\nSuccess! Subtitle System Working\n\n2\n00:00:05,000 --> 00:00:10,000\nIf you see this, file cache is OK"
+            val debugFile = File.createTempFile("bstation_debug_", ".srt")
+            debugFile.writeText(debugContent)
+            subtitleCallback.invoke(SubtitleFile("Debug Test (SRT)", debugFile.toURI().toString()))
         } catch (_: Exception) {}
 
         return foundLinks
