@@ -16,7 +16,7 @@ class Bstation : MainAPI() {
 
     private val apiUrl = "https://api.bilibili.tv"
     private val biliintlApiUrl = "https://api.biliintl.com"
-    private val subtitleProxyUrl = "https://bstation-subtitle.makairamei.workers.dev"
+    private val subtitleProxyUrl = "https://bstation-subtitle.cf1-e6a.workers.dev"
 
     private val cookies = mapOf(
         "SESSDATA" to "a97adc61%2C1785509852%2Cdd028%2A210091",
