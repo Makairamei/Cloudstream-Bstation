@@ -162,28 +162,22 @@ class Bstation : MainAPI() {
                 val quality = stream.streamInfo?.displayDesc ?: "Unknown"
                 
                 callback.invoke(
-                    ExtractorLink(
-                        this.name,
-                        "$name $quality",
-                        videoUrl,
-                        "$mainUrl/",
-                        getQualityFromName(quality),
-                        headers = headers
-                    )
+                    newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                        this.referer = "$mainUrl/"
+                        this.quality = getQualityFromName(quality)
+                        this.headers = this@Bstation.headers
+                    }
                 )
             }
             
             oldRes?.result?.durl?.forEach { durl ->
                 val videoUrl = durl.url ?: return@forEach
                 callback.invoke(
-                    ExtractorLink(
-                        this.name,
-                        "$name Default",
-                        videoUrl,
-                        "$mainUrl/",
-                        Qualities.Unknown.value,
-                        headers = headers
-                    )
+                    newExtractorLink(this.name, "$name Default", videoUrl, INFER_TYPE) {
+                        this.referer = "$mainUrl/"
+                        this.quality = Qualities.Unknown.value
+                        this.headers = this@Bstation.headers
+                    }
                 )
             }
             
@@ -201,14 +195,11 @@ class Bstation : MainAPI() {
             val quality = videoItem.streamInfo?.descWords ?: "${videoResource.height ?: 0}P"
 
             callback.invoke(
-                ExtractorLink(
-                    this.name,
-                    "$name $quality",
-                    videoUrl,
-                    "$mainUrl/",
-                    getQualityFromName(quality),
-                    headers = headers
-                )
+                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                    this.referer = "$mainUrl/"
+                    this.quality = getQualityFromName(quality)
+                    this.headers = this@Bstation.headers
+                }
             )
         }
 
