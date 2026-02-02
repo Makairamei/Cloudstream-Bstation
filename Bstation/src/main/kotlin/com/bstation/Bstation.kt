@@ -179,34 +179,26 @@ class Bstation : MainAPI() {
                 }
                 
                 // 2. Process streamList (DASH/Split)
-                // Use SAFETY CATCH for audio merging to support both Stable and Pre-release
+                // Stable Version: Cannot merge audio (newAudioFile is missing).
+                // Strategy: Show links but label them "(No Audio)" if split.
                  videoInfo.streamList?.forEach { stream ->
                     val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
                     var quality = stream.streamInfo?.displayDesc ?: "Unknown"
-                    var audioFiles: List<AudioTrack> = emptyList()
                     var hasAudio = false
                     
-                    // Try to merge audio (Prerelease Feature)
-                    // Must catch THROWABLE to handle NoSuchMethodError on Stable
+                    // Check if audio is split
                     if (!audioUrl.isNullOrEmpty()) {
-                        try {
-                             audioFiles = listOf(newAudioFile(audioUrl) {})
-                             hasAudio = true
-                        } catch (t: Throwable) {
-                            // Stable Version: Cannot merge audio.
-                            // Mark as "No Audio" so user knows.
-                        }
+                         // Split audio detected. On Stable, we can't join it.
+                         // Label clearly.
+                         quality = "$quality (No Audio)"
+                    } else {
+                        // If audioUrl is null, maybe it is muxed?
+                        // Leave quality as is.
+                        hasAudio = true
                     }
 
                     // Strict Deduplication:
                     // Only skip if we already added this exact quality label.
-                    // If one is "1080P (Direct)" and this is "1080P (No Audio)", both actally show up.
-                    
-                    // Modify quality label if silent
-                    if (!audioUrl.isNullOrEmpty() && !hasAudio) {
-                        quality = "$quality (No Audio)"
-                    }
-                    
                     if (addedQualities.contains(quality)) return@forEach
                     addedQualities.add(quality)
 
@@ -215,9 +207,6 @@ class Bstation : MainAPI() {
                             this.referer = "$mainUrl/"
                             this.quality = getQualityFromName(quality)
                             this.headers = this@Bstation.headers
-                            if (hasAudio) {
-                                this.audioTracks = audioFiles
-                            }
                         }
                     )
                     foundLinks = true
