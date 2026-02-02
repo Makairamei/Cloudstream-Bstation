@@ -132,6 +132,7 @@ class Bstation : MainAPI() {
             this.plot = description
         }
     }
+    @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -154,19 +155,46 @@ class Bstation : MainAPI() {
             val videoInfo = primaryRes?.data?.videoInfo
             
             if (videoInfo != null) {
+                // Get audio URL
+                val audioUrl = videoInfo.dashAudio?.firstOrNull()?.baseUrl
+                
                 videoInfo.streamList?.forEach { stream ->
                     val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
                     val quality = stream.streamInfo?.displayDesc ?: "Unknown"
                     
-                    // Simple callback without audio (for stability on 4.6.0)
-                    callback.invoke(
-                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                            this.referer = "$mainUrl/"
-                            this.quality = getQualityFromName(quality)
-                            this.headers = this@Bstation.headers
+                    // Try with audio first (pre-release Cloudstream)
+                    try {
+                        if (!audioUrl.isNullOrEmpty()) {
+                            val audioFiles = listOf(newAudioFile(audioUrl) {})
+                            callback.invoke(
+                                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                    this.referer = "$mainUrl/"
+                                    this.quality = getQualityFromName(quality)
+                                    this.headers = this@Bstation.headers
+                                    this.audioTracks = audioFiles
+                                }
+                            )
+                        } else {
+                            callback.invoke(
+                                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                    this.referer = "$mainUrl/"
+                                    this.quality = getQualityFromName(quality)
+                                    this.headers = this@Bstation.headers
+                                }
+                            )
                         }
-                    )
-                    foundLinks = true
+                        foundLinks = true
+                    } catch (e: Exception) {
+                        // Fallback: video only (stable Cloudstream 4.6.0)
+                        callback.invoke(
+                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                this.referer = "$mainUrl/"
+                                this.quality = getQualityFromName(quality)
+                                this.headers = this@Bstation.headers
+                            }
+                        )
+                        foundLinks = true
+                    }
                 }
                 
                 // Also check durl
@@ -193,6 +221,7 @@ class Bstation : MainAPI() {
                 
                 if (playurl != null) {
                     val videos = playurl.video ?: emptyList()
+                    val audioUrl = playurl.audioResource?.maxByOrNull { it.bandwidth ?: 0 }?.url
                     
                     for (videoItem in videos) {
                         val videoResource = videoItem.videoResource ?: continue
@@ -201,14 +230,39 @@ class Bstation : MainAPI() {
                         
                         val quality = videoItem.streamInfo?.descWords ?: "${videoResource.height ?: 0}P"
                         
-                        callback.invoke(
-                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                                this.referer = "$mainUrl/"
-                                this.quality = getQualityFromName(quality)
-                                this.headers = this@Bstation.headers
+                        // Try with audio first (pre-release Cloudstream)
+                        try {
+                            if (!audioUrl.isNullOrEmpty()) {
+                                val audioFiles = listOf(newAudioFile(audioUrl) {})
+                                callback.invoke(
+                                    newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                        this.referer = "$mainUrl/"
+                                        this.quality = getQualityFromName(quality)
+                                        this.headers = this@Bstation.headers
+                                        this.audioTracks = audioFiles
+                                    }
+                                )
+                            } else {
+                                callback.invoke(
+                                    newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                        this.referer = "$mainUrl/"
+                                        this.quality = getQualityFromName(quality)
+                                        this.headers = this@Bstation.headers
+                                    }
+                                )
                             }
-                        )
-                        foundLinks = true
+                            foundLinks = true
+                        } catch (e: Exception) {
+                            // Fallback: video only (stable Cloudstream 4.6.0)
+                            callback.invoke(
+                                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                    this.referer = "$mainUrl/"
+                                    this.quality = getQualityFromName(quality)
+                                    this.headers = this@Bstation.headers
+                                }
+                            )
+                            foundLinks = true
+                        }
                     }
                 }
             } catch (_: Exception) {}
