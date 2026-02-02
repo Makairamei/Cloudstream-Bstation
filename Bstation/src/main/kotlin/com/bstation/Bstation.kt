@@ -5,7 +5,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
-import org.jsoup.nodes.Element
 
 class Bstation : MainAPI() {
     override var mainUrl = "https://www.bilibili.tv"
@@ -34,35 +33,47 @@ class Bstation : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "anime" to "Anime",
-        "trending" to "Trending"
+        "timeline" to "Jadwal Rilis",
+        "search" to "Anime Populer"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val targetUrl = if(request.data == "trending") "$mainUrl/id/trending" else "$mainUrl/id/anime"
+        val items = mutableListOf<SearchResponse>()
         
-        val document = app.get(targetUrl, headers = headers, cookies = cookies).document
+        if (request.data == "timeline") {
+            // Use Timeline API
+            val timelineUrl = "$apiUrl/intl/gateway/web/v2/ogv/timeline?s_locale=id_ID&platform=web"
+            val res = app.get(timelineUrl, headers = headers, cookies = cookies).parsedSafe<TimelineResult>()
+            
+            res?.data?.items?.forEach { day ->
+                day.cards?.forEach { card ->
+                    val title = card.title ?: return@forEach
+                    val seasonId = card.seasonId ?: return@forEach
+                    val cover = card.cover
+                    
+                    items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
+                        this.posterUrl = cover
+                    })
+                }
+            }
+        } else {
+            // Use Search API for popular anime
+            val searchUrl = "$apiUrl/intl/gateway/web/v2/search_result?keyword=anime&s_locale=id_ID&limit=20"
+            val res = app.get(searchUrl, headers = headers, cookies = cookies).parsedSafe<SearchResult>()
+            
+            res?.data?.modules?.forEach { module ->
+                module.data?.items?.forEach { item ->
+                    val title = item.title ?: return@forEach
+                    val seasonId = item.seasonId ?: return@forEach
+                    
+                    items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
+                        this.posterUrl = item.cover
+                    })
+                }
+            }
+        }
         
-        val items = document.select("a[href*='/play/']").mapNotNull { element ->
-             val href = element.attr("href")
-             val id = href.substringAfter("/play/").substringBefore("?").filter { it.isDigit() }
-             if (id.isEmpty()) return@mapNotNull null
-             
-             var title = element.text()
-             if (title.isBlank()) {
-                 title = element.select("h3, p, div[class*='title']").text()
-             }
-             if (title.isBlank()) title = "Unknown Title"
-
-             var poster = element.select("img").attr("src")
-             if (poster.isEmpty()) poster = element.select("img").attr("data-src")
-             
-             newAnimeSearchResponse(title, id, TvType.Anime) {
-                 this.posterUrl = poster
-             }
-        }.distinctBy { it.url }
-
-        return newHomePageResponse(request.name, items)
+        return newHomePageResponse(request.name, items.distinctBy { it.url })
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -122,32 +133,64 @@ class Bstation : MainAPI() {
         }
     }
 
-    @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val loadData = parseJson<LoadData>(data)
+        val loadData = try {
+            parseJson<LoadData>(data)
+        } catch (e: Exception) {
+            // If data is just episode ID string
+            LoadData(data, "")
+        }
         val epId = loadData.epId
         
         // Use biliintl.com API which returns valid URLs for 480p and below
         val playUrl = "$biliintlApiUrl/intl/gateway/web/playurl?ep_id=$epId&s_locale=id_ID&platform=android&qn=64"
         val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<BiliIntlPlayResult>()
-        val playurl = res?.data?.playurl ?: return false
-
-        // Get audio tracks
-        val audioResources = playurl.audioResource ?: emptyList()
-        val audioTracks = audioResources.mapNotNull { audio ->
-            val audioUrl = audio.url ?: return@mapNotNull null
-            // newAudioFile uses suspend lambda builder pattern
-            newAudioFile(audioUrl) {
-                // Properties can be set here if needed
+        val playurl = res?.data?.playurl
+        
+        if (playurl == null) {
+            // Fallback to old API
+            val oldPlayUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID"
+            val oldRes = app.get(oldPlayUrl, headers = headers, cookies = cookies).parsedSafe<OldPlayResult>()
+            
+            oldRes?.result?.videoInfo?.streamList?.forEach { stream ->
+                val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
+                val quality = stream.streamInfo?.displayDesc ?: "Unknown"
+                
+                callback.invoke(
+                    ExtractorLink(
+                        this.name,
+                        "$name $quality",
+                        videoUrl,
+                        "$mainUrl/",
+                        getQualityFromName(quality),
+                        headers = headers
+                    )
+                )
             }
+            
+            oldRes?.result?.durl?.forEach { durl ->
+                val videoUrl = durl.url ?: return@forEach
+                callback.invoke(
+                    ExtractorLink(
+                        this.name,
+                        "$name Default",
+                        videoUrl,
+                        "$mainUrl/",
+                        Qualities.Unknown.value,
+                        headers = headers
+                    )
+                )
+            }
+            
+            return true
         }
 
-        // Process video streams
+        // Process video streams from biliintl API
         val videos = playurl.video ?: emptyList()
         
         for (videoItem in videos) {
@@ -157,14 +200,15 @@ class Bstation : MainAPI() {
             
             val quality = videoItem.streamInfo?.descWords ?: "${videoResource.height ?: 0}P"
 
-            // Create ExtractorLink with audioTracks for audio support
             callback.invoke(
-                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                    this.referer = "$mainUrl/"
-                    this.quality = getQualityFromName(quality)
-                    this.headers = this@Bstation.headers
-                    this.audioTracks = audioTracks
-                }
+                ExtractorLink(
+                    this.name,
+                    "$name $quality",
+                    videoUrl,
+                    "$mainUrl/",
+                    getQualityFromName(quality),
+                    headers = headers
+                )
             )
         }
 
@@ -192,6 +236,17 @@ class Bstation : MainAPI() {
     // Data Classes
     data class LoadData(val epId: String, val seasonId: String)
     
+    // Timeline API
+    data class TimelineResult(@JsonProperty("data") val data: TimelineData?)
+    data class TimelineData(@JsonProperty("items") val items: List<TimelineDay>?)
+    data class TimelineDay(@JsonProperty("cards") val cards: List<TimelineCard>?)
+    data class TimelineCard(
+        @JsonProperty("title") val title: String?,
+        @JsonProperty("cover") val cover: String?,
+        @JsonProperty("season_id") val seasonId: String?
+    )
+    
+    // Search API
     data class SearchResult(@JsonProperty("data") val data: SearchData?)
     data class SearchData(@JsonProperty("modules") val modules: List<SearchModule>?)
     data class SearchModule(@JsonProperty("data") val data: SearchModuleData?)
@@ -202,6 +257,7 @@ class Bstation : MainAPI() {
         @JsonProperty("cover") val cover: String?
     )
 
+    // Season API
     data class SeasonResult(@JsonProperty("result") val result: SeasonData?)
     data class SeasonData(
         @JsonProperty("title") val title: String?,
@@ -224,6 +280,22 @@ class Bstation : MainAPI() {
         @JsonProperty("title") val title: String?,
         @JsonProperty("url") val url: String?
     )
+
+    // Old Play API (fallback)
+    data class OldPlayResult(@JsonProperty("result") val result: OldPlayData?)
+    data class OldPlayData(
+        @JsonProperty("video_info") val videoInfo: OldVideoInfo?,
+        @JsonProperty("durl") val durl: List<OldDurl>?
+    )
+    data class OldVideoInfo(@JsonProperty("stream_list") val streamList: List<OldStream>?)
+    data class OldStream(
+        @JsonProperty("stream_info") val streamInfo: OldStreamInfo?,
+        @JsonProperty("dash_video") val dashVideo: OldDashVideo?,
+        @JsonProperty("base_url") val baseUrl: String?
+    )
+    data class OldStreamInfo(@JsonProperty("display_desc") val displayDesc: String?)
+    data class OldDashVideo(@JsonProperty("base_url") val baseUrl: String?)
+    data class OldDurl(@JsonProperty("url") val url: String?)
 
     // BiliIntl Play Response Classes
     data class BiliIntlPlayResult(
