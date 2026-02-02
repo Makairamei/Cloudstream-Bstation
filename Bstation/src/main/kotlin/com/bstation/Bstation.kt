@@ -17,6 +17,7 @@ class Bstation : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
     private val apiUrl = "https://api.bilibili.tv"
+    private val biliintlApiUrl = "https://api.biliintl.com"
 
     private val cookies = mapOf(
         "SESSDATA" to "77adc14d%2C1784135329%2C49214%2A110091",
@@ -131,29 +132,42 @@ class Bstation : MainAPI() {
         val loadData = parseJson<LoadData>(data)
         val epId = loadData.epId
         
-        // Request DASH streams
-        val playUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&s_locale=id_ID"
-        val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<PlayResult>()
-        val playResult = res?.result ?: res?.data ?: return false
+        // Use biliintl.com API which returns valid URLs for 480p and below
+        val playUrl = "$biliintlApiUrl/intl/gateway/web/playurl?ep_id=$epId&s_locale=id_ID&platform=android&qn=64"
+        val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<BiliIntlPlayResult>()
+        val playurl = res?.data?.playurl ?: return false
+        
+        val duration = playurl.duration ?: 0
 
-        // Get video streams
-        val videoInfo = playResult.videoInfo
-        val streamList = videoInfo?.streamList ?: emptyList()
-        val dashAudio = videoInfo?.dashAudio ?: emptyList()
-        val duration = videoInfo?.timelength ?: 0
+        // Get audio URL (use first available)
+        val audioResources = playurl.audioResource ?: emptyList()
+        val audioUrl = audioResources.firstOrNull()?.url
 
-        // Get first available audio URL
-        val audioUrl = dashAudio.firstOrNull()?.baseUrl
-
-        // Process each quality
-        for (stream in streamList) {
-            val quality = stream.streamInfo?.displayDesc ?: continue
-            val videoUrl = stream.dashVideo?.baseUrl
-            if (videoUrl.isNullOrEmpty()) continue
+        // Process video streams
+        val videos = playurl.video ?: emptyList()
+        
+        for (videoItem in videos) {
+            val videoResource = videoItem.videoResource ?: continue
+            val videoUrl = videoResource.url
+            if (videoUrl.isNullOrEmpty()) continue // Skip locked qualities
+            
+            val quality = videoItem.streamInfo?.descWords ?: "${videoResource.height ?: 0}P"
+            val width = videoResource.width ?: 0
+            val height = videoResource.height ?: 0
 
             // If we have both video and audio, create a DASH manifest
             if (audioUrl != null) {
-                val manifest = generateDashManifest(videoUrl, audioUrl, duration)
+                val manifest = generateDashManifest(
+                    videoUrl = videoUrl,
+                    audioUrl = audioUrl,
+                    durationMs = duration,
+                    videoCodecs = videoResource.codecs ?: "avc1.64001F",
+                    audioCodecs = audioResources.firstOrNull()?.codecs ?: "mp4a.40.2",
+                    width = width,
+                    height = height,
+                    videoBandwidth = videoResource.bandwidth ?: 500000,
+                    audioBandwidth = audioResources.firstOrNull()?.bandwidth ?: 128000
+                )
                 val manifestDataUri = "data:application/dash+xml;base64," + 
                     Base64.encodeToString(manifest.toByteArray(), Base64.NO_WRAP)
                 
@@ -166,7 +180,7 @@ class Bstation : MainAPI() {
             } else {
                 // Fallback: video only
                 callback.invoke(
-                    newExtractorLink(this.name, "$name $quality (No Audio)", videoUrl, INFER_TYPE) {
+                    newExtractorLink(this.name, "$name $quality (Video Only)", videoUrl, INFER_TYPE) {
                         this.referer = "$mainUrl/"
                         this.quality = getQualityFromName(quality)
                     }
@@ -174,7 +188,7 @@ class Bstation : MainAPI() {
             }
         }
 
-        // Fetch subtitles
+        // Fetch subtitles from season API
         try {
             val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/season?ep_id=$epId&platform=web&s_locale=id_ID"
             val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<SeasonResult>()
@@ -195,7 +209,17 @@ class Bstation : MainAPI() {
         return true
     }
 
-    private fun generateDashManifest(videoUrl: String, audioUrl: String, durationMs: Long): String {
+    private fun generateDashManifest(
+        videoUrl: String,
+        audioUrl: String,
+        durationMs: Long,
+        videoCodecs: String,
+        audioCodecs: String,
+        width: Int,
+        height: Int,
+        videoBandwidth: Int,
+        audioBandwidth: Int
+    ): String {
         val durationSec = durationMs / 1000
         val hours = durationSec / 3600
         val minutes = (durationSec % 3600) / 60
@@ -205,13 +229,13 @@ class Bstation : MainAPI() {
         return """<?xml version="1.0" encoding="UTF-8"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="$durationStr" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
   <Period duration="$durationStr">
-    <AdaptationSet mimeType="video/mp4" contentType="video">
-      <Representation id="video" bandwidth="500000">
+    <AdaptationSet mimeType="video/mp4" contentType="video" subsegmentAlignment="true" subsegmentStartsWithSAP="1">
+      <Representation id="video" bandwidth="$videoBandwidth" codecs="$videoCodecs" width="$width" height="$height">
         <BaseURL>$videoUrl</BaseURL>
       </Representation>
     </AdaptationSet>
-    <AdaptationSet mimeType="audio/mp4" contentType="audio" lang="und">
-      <Representation id="audio" bandwidth="128000">
+    <AdaptationSet mimeType="audio/mp4" contentType="audio" lang="und" subsegmentAlignment="true" subsegmentStartsWithSAP="1">
+      <Representation id="audio" bandwidth="$audioBandwidth" codecs="$audioCodecs">
         <BaseURL>$audioUrl</BaseURL>
       </Representation>
     </AdaptationSet>
@@ -255,40 +279,39 @@ class Bstation : MainAPI() {
         @JsonProperty("url") val url: String?
     )
 
-    // Play Response Classes
-    data class PlayResult(
-        @JsonProperty("result") val result: PlayData?,
-        @JsonProperty("data") val data: PlayData?
+    // BiliIntl Play Response Classes
+    data class BiliIntlPlayResult(
+        @JsonProperty("code") val code: Int?,
+        @JsonProperty("data") val data: BiliIntlData?
     )
-    data class PlayData(
-        @JsonProperty("video_info") val videoInfo: VideoInfo?,
-        @JsonProperty("dash") val dash: DashData?,
-        @JsonProperty("durl") val durl: List<DurlData>?
+    data class BiliIntlData(
+        @JsonProperty("playurl") val playurl: BiliIntlPlayurl?
     )
-    data class VideoInfo(
-        @JsonProperty("stream_list") val streamList: List<StreamData>?,
-        @JsonProperty("dash_audio") val dashAudio: List<DashAudioData>?,
-        @JsonProperty("timelength") val timelength: Long?
+    data class BiliIntlPlayurl(
+        @JsonProperty("duration") val duration: Long?,
+        @JsonProperty("video") val video: List<BiliIntlVideo>?,
+        @JsonProperty("audio_resource") val audioResource: List<BiliIntlAudio>?
     )
-    data class DashData(
-        @JsonProperty("video") val video: List<StreamData>?,
-        @JsonProperty("audio") val audio: List<StreamData>?
+    data class BiliIntlVideo(
+        @JsonProperty("video_resource") val videoResource: BiliIntlVideoResource?,
+        @JsonProperty("stream_info") val streamInfo: BiliIntlStreamInfo?,
+        @JsonProperty("audio_quality") val audioQuality: Int?
     )
-    data class StreamData(
-        @JsonProperty("base_url") val baseUrl: String?,
-        @JsonProperty("dash_video") val dashVideo: DashVideoData?,
-        @JsonProperty("height") val height: Int?,
-        @JsonProperty("stream_info") val streamInfo: StreamInfo?
+    data class BiliIntlVideoResource(
+        @JsonProperty("url") val url: String?,
+        @JsonProperty("bandwidth") val bandwidth: Int?,
+        @JsonProperty("codecs") val codecs: String?,
+        @JsonProperty("width") val width: Int?,
+        @JsonProperty("height") val height: Int?
     )
-    data class DashVideoData(
-        @JsonProperty("base_url") val baseUrl: String?,
-        @JsonProperty("audio_id") val audioId: Int?
+    data class BiliIntlStreamInfo(
+        @JsonProperty("quality") val quality: Int?,
+        @JsonProperty("desc_words") val descWords: String?
     )
-    data class DashAudioData(
-        @JsonProperty("id") val id: Int?,
-        @JsonProperty("base_url") val baseUrl: String?,
-        @JsonProperty("bandwidth") val bandwidth: Int?
+    data class BiliIntlAudio(
+        @JsonProperty("url") val url: String?,
+        @JsonProperty("bandwidth") val bandwidth: Int?,
+        @JsonProperty("codecs") val codecs: String?,
+        @JsonProperty("quality") val quality: Int?
     )
-    data class StreamInfo(@JsonProperty("display_desc") val displayDesc: String?)
-    data class DurlData(@JsonProperty("url") val url: String?)
 }

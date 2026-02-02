@@ -1,5 +1,5 @@
 """
-Debug Bilibili TV API - Full structure dump
+Test the BILIINTL API endpoint for HLS streams
 """
 import requests
 import json
@@ -8,8 +8,6 @@ cookies = {
     "SESSDATA": "77adc14d%2C1784135329%2C49214%2A110091",
     "bili_jct": "b9cd1b814e7484becba8917728142c21",
     "DedeUserID": "1709563281",
-    "buvid3": "1d09ce3a-0767-40d7-b74a-cb7be2294d8064620infoc",
-    "buvid4": "EDD5D20E-2881-5FC4-ACF3-38407A33613880170-026011701-uQai4h5eTsQ9YIdcmk0IhA%3D%3D",
     "bstar-web-lang": "id"
 }
 
@@ -21,49 +19,62 @@ headers = {
 
 ep_id = "13261950"
 
-url = f"https://api.bilibili.tv/intl/gateway/v2/ogv/playurl?ep_id={ep_id}&platform=web&qn=64&s_locale=id_ID"
+print("=" * 60)
+print("Testing BILIINTL.COM API Endpoint")
+print("=" * 60)
 
-resp = requests.get(url, cookies=cookies, headers=headers, timeout=10)
-data = resp.json()
+# Test the biliintl.com endpoint
+urls = [
+    f"https://api.biliintl.com/intl/gateway/web/playurl?ep_id={ep_id}&s_locale=id_ID&device=wap&platform=web&qn=64&tf=0&type=0",
+    f"https://api.biliintl.com/intl/gateway/web/playurl?ep_id={ep_id}&s_locale=id_ID&platform=web&qn=64",
+    f"https://api.biliintl.com/intl/gateway/web/playurl?ep_id={ep_id}&s_locale=id_ID&platform=android&qn=64",
+]
 
-# Save full response to file
-with open("debug_response.json", "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=2, ensure_ascii=False)
-
-print("Full response saved to debug_response.json")
-print(f"Code: {data.get('code')}")
-
-result = data.get('result') or data.get('data') or {}
-
-# Check video_info structure
-video_info = result.get('video_info', {})
-print(f"\nvideo_info keys: {video_info.keys()}")
-
-# Check if there's audio in video_info
-dash_audio = video_info.get('dash_audio', [])
-print(f"video_info.dash_audio: {len(dash_audio)} items")
-
-# Check first stream structure
-stream_list = video_info.get('stream_list', [])
-if stream_list:
-    first = stream_list[0]
-    print(f"\nFirst stream structure:")
-    print(f"  Keys: {first.keys()}")
+for url in urls:
+    print(f"\n--- Testing: {url[:80]}... ---")
     
-    # Check stream_info
-    si = first.get('stream_info', {})
-    print(f"  stream_info: {si}")
-    
-    # Check dash_video
-    dv = first.get('dash_video', {})
-    print(f"  dash_video keys: {dv.keys()}")
-    print(f"  dash_video.base_url: {dv.get('base_url', 'N/A')[:100]}...")
+    try:
+        resp = requests.get(url, cookies=cookies, headers=headers, timeout=10)
+        data = resp.json()
+        
+        code = data.get('code')
+        msg = data.get('message', 'N/A')
+        print(f"Code: {code}, Message: {msg}")
+        
+        if code == 0:
+            result = data.get('data', {})
+            
+            # Check playurl field
+            playurl = result.get('playurl', {})
+            print(f"Playurl keys: {playurl.keys() if playurl else 'None'}")
+            
+            # Check for video list
+            video = playurl.get('video', [])
+            audio = playurl.get('audio_resource', [])
+            print(f"Video streams: {len(video)}, Audio streams: {len(audio)}")
+            
+            # Check for HLS/m3u8
+            if video:
+                for v in video[:2]:
+                    url_str = v.get('video_resource', {}).get('url', '')
+                    print(f"  Video URL: {url_str[:100]}...")
+                    if '.m3u8' in url_str:
+                        print("  *** THIS IS M3U8/HLS! ***")
+            
+            # Print raw for debugging
+            raw = json.dumps(result, ensure_ascii=False)
+            if '.m3u8' in raw:
+                print("*** FOUND .m3u8 IN RESPONSE ***")
+            
+            # Save full response
+            with open("biliintl_response.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            print("Full response saved to biliintl_response.json")
+            
+    except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
 
-# Print dash_audio details if exists
-if dash_audio:
-    print(f"\nDash Audio Details:")
-    for i, a in enumerate(dash_audio):
-        print(f"  [{i}] base_url: {a.get('base_url', 'N/A')[:100]}...")
-
-# Also check result keys
-print(f"\nResult top-level keys: {result.keys()}")
+print("\n" + "=" * 60)
+print("Done")
