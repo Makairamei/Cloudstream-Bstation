@@ -186,6 +186,10 @@ class Bstation : MainAPI() {
 
         // Process video streams from biliintl API
         val videos = playurl.video ?: emptyList()
+        val audios = playurl.audioResource ?: emptyList()
+        
+        // Get highest quality audio URL
+        val primaryAudioUrl = audios.maxByOrNull { it.bandwidth ?: 0 }?.url
         
         for (videoItem in videos) {
             val videoResource = videoItem.videoResource ?: continue
@@ -194,13 +198,37 @@ class Bstation : MainAPI() {
             
             val quality = videoItem.streamInfo?.descWords ?: "${videoResource.height ?: 0}P"
 
-            callback.invoke(
-                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                    this.referer = "$mainUrl/"
-                    this.quality = getQualityFromName(quality)
-                    this.headers = this@Bstation.headers
+            // Try to create ExtractorLink with audio tracks (pre-release feature)
+            try {
+                // Create audio file list
+                val audioFiles = if (!primaryAudioUrl.isNullOrEmpty()) {
+                    listOf(newAudioFile(primaryAudioUrl) {
+                        // Set audio properties if needed
+                    })
+                } else {
+                    emptyList()
                 }
-            )
+                
+                callback.invoke(
+                    newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                        this.referer = "$mainUrl/"
+                        this.quality = getQualityFromName(quality)
+                        this.headers = this@Bstation.headers
+                        if (audioFiles.isNotEmpty()) {
+                            this.audioTracks = audioFiles
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                // Fallback: Just video without audio tracks
+                callback.invoke(
+                    newExtractorLink(this.name, "$name $quality (Video Only)", videoUrl, INFER_TYPE) {
+                        this.referer = "$mainUrl/"
+                        this.quality = getQualityFromName(quality)
+                        this.headers = this@Bstation.headers
+                    }
+                )
+            }
         }
 
         // Fetch subtitles from Episode API (dedicated endpoint for subtitles)
