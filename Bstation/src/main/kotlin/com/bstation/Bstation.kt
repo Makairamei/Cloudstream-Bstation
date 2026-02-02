@@ -239,9 +239,7 @@ class Bstation : MainAPI() {
                 // 1. Original JSON URL (Fallback)
                 subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
                 
-                } catch (e: Exception) {
-                    // Ignore Data URI errors
-                }
+
             }
         } catch (_: Exception) {}
 
