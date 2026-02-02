@@ -1,7 +1,5 @@
 package com.bstation
 
-import android.util.Base64
-
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
@@ -134,7 +132,6 @@ class Bstation : MainAPI() {
             this.plot = description
         }
     }
-    @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -180,7 +177,7 @@ class Bstation : MainAPI() {
                     foundLinks = true
                 }
                 
-                // 2. Process streamList (DASH/Split) with Audio Merging
+                // 2. Process streamList - SIMPLE MODE (No Audio Merging)
                  videoInfo.streamList?.forEach { stream ->
                     val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
                     val quality = stream.streamInfo?.displayDesc ?: "Unknown"
@@ -189,27 +186,14 @@ class Bstation : MainAPI() {
                     if (addedQualities.contains(quality)) return@forEach
                     addedQualities.add(quality)
 
-                    // Merge Audio using Pre-release API
-                    if (!audioUrl.isNullOrEmpty()) {
-                        val audioFiles = listOf(newAudioFile(audioUrl) {})
-                        callback.invoke(
-                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                                this.referer = "$mainUrl/"
-                                this.quality = getQualityFromName(quality)
-                                this.headers = this@Bstation.headers
-                                this.audioTracks = audioFiles
-                            }
-                        )
-                    } else {
-                        // No separate audio, assume muxed
-                        callback.invoke(
-                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                                this.referer = "$mainUrl/"
-                                this.quality = getQualityFromName(quality)
-                                this.headers = this@Bstation.headers
-                            }
-                        )
-                    }
+                    // Simple video link without audio merging
+                    callback.invoke(
+                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                            this.referer = "$mainUrl/"
+                            this.quality = getQualityFromName(quality)
+                            this.headers = this@Bstation.headers
+                        }
+                    )
                     foundLinks = true
                 }
             }
@@ -256,25 +240,9 @@ class Bstation : MainAPI() {
                 val subUrl = sub.url ?: return@forEach
                 val subTitle = sub.title ?: sub.lang ?: "Unknown"
                 
-                // 1. Original JSON URL (Fallback)
-                subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
-                
-                // 2. Convert JSON to SRT Data URI
-                try {
-                    val jsonSubtitle = app.get(subUrl, headers = headers).parsedSafe<BiliSubtitleJson>()
-                    val srtContent = convertJsonToSrt(jsonSubtitle)
-                    
-                    if (srtContent.isNotEmpty()) {
-                        val base64Content = Base64.encodeToString(
-                            srtContent.toByteArray(Charsets.UTF_8),
-                            Base64.NO_WRAP
-                        )
-                        val dataUri = "data:application/x-subrip;base64,$base64Content"
-                        subtitleCallback.invoke(SubtitleFile(subTitle, dataUri))
-                    }
-                } catch (e: Exception) {
-                    // Conversion failed, user still has JSON option
-                }
+                // Original JSON URL only (No conversion)
+                subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
+            }
             }
         } catch (_: Exception) {}
 
