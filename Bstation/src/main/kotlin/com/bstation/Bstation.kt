@@ -1,5 +1,6 @@
 package com.bstation
 
+import android.util.Base64
 import java.io.File
 
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -270,7 +271,7 @@ class Bstation : MainAPI() {
             } catch (_: Exception) {}
         }
 
-        // Fetch subtitles and convert JSON to SRT (using File Cache)
+        // Fetch subtitles and convert JSON to SRT
         try {
             val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/episode?ep_id=$epId&platform=web&s_locale=id_ID"
             val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<EpisodeResult>()
@@ -280,22 +281,22 @@ class Bstation : MainAPI() {
                 val subTitle = sub.title ?: sub.lang ?: "Unknown"
                 
                 try {
-                    // Fetch JSON subtitle and convert to SRT
-                    // IMPORTANT: Do NOT send headers/cookies to CDN, strict CORS/Auth might block it
-                    val jsonSubtitle = app.get(subUrl).parsedSafe<BiliSubtitleJson>()
+                    // Fetch JSON subtitle (Headers restored to avoid CDN 403)
+                    val jsonSubtitle = app.get(subUrl, headers = headers).parsedSafe<BiliSubtitleJson>()
                     val srtContent = convertJsonToSrt(jsonSubtitle)
                     
                     if (srtContent.isNotEmpty()) {
-                        // Save to temporary file to avoid Data URI size limits
                         try {
-                            // Unique filename: bstation_sub_[uniqueId]
-                            val uniqueId = "${epId}_${subUrl.hashCode()}"
-                            val tempFile = File.createTempFile("bstation_sub_${uniqueId}_", ".srt")
-                            tempFile.writeText(srtContent)
-                            
-                            subtitleCallback.invoke(SubtitleFile(subTitle, tempFile.toURI().toString()))
+                            // Try Data URI with specific MIME type (application/x-subrip)
+                            // Use android.util.Base64 for compatibility
+                            val base64Content = Base64.encodeToString(
+                                srtContent.toByteArray(Charsets.UTF_8),
+                                Base64.NO_WRAP
+                            )
+                            val srtDataUri = "data:application/x-subrip;base64,$base64Content"
+                            subtitleCallback.invoke(SubtitleFile(subTitle, srtDataUri))
                         } catch (e: Exception) {
-                            // Fallback to original URL if file write fails
+                            // Only fallback to URL if encoding fails
                             subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
                         }
                     }
@@ -304,25 +305,6 @@ class Bstation : MainAPI() {
                     subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
                 }
             }
-        } catch (_: Exception) {}
-
-        // EXPERIMENT: 3 Debug Tracks for Build 60 (v10)
-        try {
-            // Track 1: Data URI SRT (application/x-subrip)
-            val srtText = "1\n00:00:00,000 --> 00:00:05,000\nDebug DataURI SRT Works!"
-            val b64Srt = java.util.Base64.getEncoder().encodeToString(srtText.toByteArray())
-            subtitleCallback.invoke(SubtitleFile("Debug 1: DataURI SRT", "data:application/x-subrip;base64,$b64Srt"))
-
-            // Track 2: Data URI VTT (text/vtt)
-            val vttText = "WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nDebug DataURI VTT Works!"
-            val b64Vtt = java.util.Base64.getEncoder().encodeToString(vttText.toByteArray())
-            subtitleCallback.invoke(SubtitleFile("Debug 2: DataURI VTT", "data:text/vtt;base64,$b64Vtt"))
-            
-            // Track 3: Data URI Plain (text/plain)
-            val plainText = "1\n00:00:00,000 --> 00:00:05,000\nDebug DataURI Plain Works!"
-            val b64Plain = java.util.Base64.getEncoder().encodeToString(plainText.toByteArray())
-            subtitleCallback.invoke(SubtitleFile("Debug 3: DataURI Plain", "data:text/plain;base64,$b64Plain"))
-
         } catch (_: Exception) {}
 
         return foundLinks
