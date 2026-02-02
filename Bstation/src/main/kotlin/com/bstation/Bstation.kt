@@ -209,7 +209,7 @@ class Bstation : MainAPI() {
                     
                     callback.invoke(
                         newExtractorLink(this.name, "$name Direct", videoUrl, INFER_TYPE) {
-                            this.referer = "$mainUrl/"
+                            this.referer = "https://www.bilibili.tv/"
                             this.quality = Qualities.Unknown.value
                             this.headers = this@Bstation.headers
                         }
@@ -232,7 +232,7 @@ class Bstation : MainAPI() {
                             val audioFiles = listOf(newAudioFile(audioUrl) {})
                             callback.invoke(
                                 newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                                    this.referer = "$mainUrl/"
+                                    this.referer = "https://www.bilibili.tv/"
                                     this.quality = getQualityFromName(quality)
                                     this.headers = this@Bstation.headers
                                     this.audioTracks = audioFiles
@@ -248,7 +248,7 @@ class Bstation : MainAPI() {
                     // Fallback: Video without audio merging
                     callback.invoke(
                         newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                            this.referer = "$mainUrl/"
+                            this.referer = "https://www.bilibili.tv/"
                             this.quality = getQualityFromName(quality)
                             this.headers = this@Bstation.headers
                         }
@@ -279,7 +279,7 @@ class Bstation : MainAPI() {
                         // Stable Video Link (No Audio/Prerelease logic)
                         callback.invoke(
                             newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                                this.referer = "$mainUrl/"
+                                this.referer = "https://www.bilibili.tv/"
                                 this.quality = getQualityFromName(quality)
                                 this.headers = this@Bstation.headers
                             }
