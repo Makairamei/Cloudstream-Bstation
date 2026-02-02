@@ -35,47 +35,85 @@ class Bstation : MainAPI() {
 
     override val mainPage = mainPageOf(
         "timeline" to "Jadwal Rilis",
-        "search" to "Anime Populer"
+        "trending" to "Sedang Tren",
+        "popular" to "Anime Populer",
+        "recommend" to "Rekomendasi"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val items = mutableListOf<SearchResponse>()
         
-        if (request.data == "timeline") {
-            // Use Timeline API
-            val timelineUrl = "$apiUrl/intl/gateway/web/v2/ogv/timeline?s_locale=id_ID&platform=web"
-            val res = app.get(timelineUrl, headers = headers, cookies = cookies).parsedSafe<TimelineResult>()
-            
-            res?.data?.items?.forEach { day ->
-                day.cards?.forEach { card ->
-                    val title = card.title ?: return@forEach
-                    val seasonId = card.seasonId ?: return@forEach
-                    val cover = card.cover
-                    
-                    items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
-                        this.posterUrl = cover
-                    })
+        when (request.data) {
+            "timeline" -> {
+                // Use Timeline API for release schedule
+                val timelineUrl = "$apiUrl/intl/gateway/web/v2/ogv/timeline?s_locale=id_ID&platform=web"
+                val res = app.get(timelineUrl, headers = headers, cookies = cookies).parsedSafe<TimelineResult>()
+                
+                res?.data?.items?.forEach { day ->
+                    day.cards?.forEach { card ->
+                        val title = card.title ?: return@forEach
+                        val seasonId = card.seasonId ?: return@forEach
+                        val cover = card.cover
+                        
+                        items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
+                            this.posterUrl = cover
+                        })
+                    }
                 }
             }
-        } else {
-            // Use Search API for popular anime
-            val searchUrl = "$apiUrl/intl/gateway/web/v2/search_result?keyword=anime&s_locale=id_ID&limit=20"
-            val res = app.get(searchUrl, headers = headers, cookies = cookies).parsedSafe<SearchResult>()
-            
-            res?.data?.modules?.forEach { module ->
-                module.data?.items?.forEach { item ->
-                    val title = item.title ?: return@forEach
-                    val seasonId = item.seasonId ?: return@forEach
-                    
-                    items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
-                        this.posterUrl = item.cover
-                    })
+            "trending" -> {
+                // Use Search API with trending keywords
+                val searchUrl = "$apiUrl/intl/gateway/web/v2/search_result?keyword=2024&s_locale=id_ID&limit=30"
+                val res = app.get(searchUrl, headers = headers, cookies = cookies).parsedSafe<SearchResult>()
+                
+                res?.data?.modules?.forEach { module ->
+                    module.data?.items?.forEach { item ->
+                        val title = item.title ?: return@forEach
+                        val seasonId = item.seasonId ?: return@forEach
+                        
+                        items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
+                            this.posterUrl = item.cover
+                        })
+                    }
+                }
+            }
+            "popular" -> {
+                // Use Search API for popular anime
+                val searchUrl = "$apiUrl/intl/gateway/web/v2/search_result?keyword=anime&s_locale=id_ID&limit=30"
+                val res = app.get(searchUrl, headers = headers, cookies = cookies).parsedSafe<SearchResult>()
+                
+                res?.data?.modules?.forEach { module ->
+                    module.data?.items?.forEach { item ->
+                        val title = item.title ?: return@forEach
+                        val seasonId = item.seasonId ?: return@forEach
+                        
+                        items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
+                            this.posterUrl = item.cover
+                        })
+                    }
+                }
+            }
+            "recommend" -> {
+                // Use Search API with action/romance keywords for recommendations
+                val searchUrl = "$apiUrl/intl/gateway/web/v2/search_result?keyword=action&s_locale=id_ID&limit=30"
+                val res = app.get(searchUrl, headers = headers, cookies = cookies).parsedSafe<SearchResult>()
+                
+                res?.data?.modules?.forEach { module ->
+                    module.data?.items?.forEach { item ->
+                        val title = item.title ?: return@forEach
+                        val seasonId = item.seasonId ?: return@forEach
+                        
+                        items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
+                            this.posterUrl = item.cover
+                        })
+                    }
                 }
             }
         }
         
         return newHomePageResponse(request.name, items.distinctBy { it.url })
     }
+
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$apiUrl/intl/gateway/web/v2/search_result?keyword=$query&s_locale=id_ID&limit=20"
