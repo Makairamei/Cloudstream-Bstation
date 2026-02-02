@@ -152,7 +152,7 @@ class Bstation : MainAPI() {
         try {
             val primaryUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID"
             val primaryRes = app.get(primaryUrl, headers = headers, cookies = cookies).parsedSafe<OldPlayResult>()
-            val videoInfo = primaryRes?.result?.videoInfo
+            val videoInfo = primaryRes?.data?.videoInfo  // Changed from result to data
             
             if (videoInfo != null) {
                 val audioUrl = videoInfo.dashAudio?.firstOrNull()?.baseUrl
@@ -189,7 +189,7 @@ class Bstation : MainAPI() {
                 }
                 
                 // Also check durl
-                primaryRes.result?.durl?.forEach { durl ->
+                primaryRes.data?.durl?.forEach { durl ->  // Changed from result to data
                     val videoUrl = durl.url ?: return@forEach
                     callback.invoke(
                         newExtractorLink(this.name, "$name Direct", videoUrl, INFER_TYPE) {
@@ -318,8 +318,8 @@ class Bstation : MainAPI() {
     data class EpisodeResult(@JsonProperty("data") val data: EpisodeApiData?)
     data class EpisodeApiData(@JsonProperty("subtitles") val subtitles: List<SubtitleData>?)
 
-    // Old Play API (fallback)
-    data class OldPlayResult(@JsonProperty("result") val result: OldPlayData?)
+    // Old Play API (bilibili.tv) - Uses 'data' not 'result'
+    data class OldPlayResult(@JsonProperty("data") val data: OldPlayData?)
     data class OldPlayData(
         @JsonProperty("video_info") val videoInfo: OldVideoInfo?,
         @JsonProperty("durl") val durl: List<OldDurl>?
