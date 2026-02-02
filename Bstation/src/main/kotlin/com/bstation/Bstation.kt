@@ -6,7 +6,6 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.jsoup.nodes.Element
-import android.util.Base64
 
 class Bstation : MainAPI() {
     override var mainUrl = "https://www.bilibili.tv"
@@ -20,12 +19,12 @@ class Bstation : MainAPI() {
     private val biliintlApiUrl = "https://api.biliintl.com"
 
     private val cookies = mapOf(
-        "SESSDATA" to "77adc14d%2C1784135329%2C49214%2A110091",
-        "bili_jct" to "b9cd1b814e7484becba8917728142c21",
+        "SESSDATA" to "a97adc61%2C1785509852%2Cdd028%2A210091",
+        "bili_jct" to "bca5203c3f1cda514530500a8ca0fc10",
         "DedeUserID" to "1709563281",
-        "buvid3" to "1d09ce3a-0767-40d7-b74a-cb7be2294d8064620infoc",
-        "buvid4" to "EDD5D20E-2881-5FC4-ACF3-38407A33613880170-026011701-uQai4h5eTsQ9YIdcmk0IhA%3D%3D",
-        "bstar-web-lang" to "id"
+        "buvid3" to "ddbadfe4-0540-43ce-b22d-5644f59fded314589infoc",
+        "buvid4" to "59AD9169-1B99-2A66-E0D3-9A6E759A1FB782033-026011921-q8GoWR2UlMAMBjSSRABQgw%3D%3D",
+        "bstar-web-lang" to "en"
     )
 
     private val headers = mapOf(
@@ -155,29 +154,9 @@ class Bstation : MainAPI() {
             val width = videoResource.width ?: 0
             val height = videoResource.height ?: 0
 
-            // If we have both video and audio, create a DASH manifest
-            if (audioUrl != null) {
-                val manifest = generateDashManifest(
-                    videoUrl = videoUrl,
-                    audioUrl = audioUrl,
-                    durationMs = duration,
-                    videoCodecs = videoResource.codecs ?: "avc1.64001F",
-                    audioCodecs = audioResources.firstOrNull()?.codecs ?: "mp4a.40.2",
-                    width = width,
-                    height = height,
-                    videoBandwidth = videoResource.bandwidth ?: 500000,
-                    audioBandwidth = audioResources.firstOrNull()?.bandwidth ?: 128000
-                )
-                val manifestDataUri = "data:application/dash+xml;base64," + 
-                    Base64.encodeToString(manifest.toByteArray(), Base64.NO_WRAP)
-                
-                callback.invoke(
-                    newExtractorLink(this.name, "$name $quality", manifestDataUri, INFER_TYPE) {
-                        this.referer = "$mainUrl/"
-                        this.quality = getQualityFromName(quality)
-                    }
-                )
-            } else {
+            // Direct video URL approach (audio not supported in Cloudstream ExtractorLink)
+            // Note: Video will play without audio. For audio, use External Player.
+            {
                 // Fallback: video only
                 callback.invoke(
                     newExtractorLink(this.name, "$name $quality (Video Only)", videoUrl, INFER_TYPE) {
@@ -209,39 +188,6 @@ class Bstation : MainAPI() {
         return true
     }
 
-    private fun generateDashManifest(
-        videoUrl: String,
-        audioUrl: String,
-        durationMs: Long,
-        videoCodecs: String,
-        audioCodecs: String,
-        width: Int,
-        height: Int,
-        videoBandwidth: Int,
-        audioBandwidth: Int
-    ): String {
-        val durationSec = durationMs / 1000
-        val hours = durationSec / 3600
-        val minutes = (durationSec % 3600) / 60
-        val seconds = durationSec % 60
-        val durationStr = "PT${hours}H${minutes}M${seconds}S"
-
-        return """<?xml version="1.0" encoding="UTF-8"?>
-<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="$durationStr" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
-  <Period duration="$durationStr">
-    <AdaptationSet mimeType="video/mp4" contentType="video" subsegmentAlignment="true" subsegmentStartsWithSAP="1">
-      <Representation id="video" bandwidth="$videoBandwidth" codecs="$videoCodecs" width="$width" height="$height">
-        <BaseURL>$videoUrl</BaseURL>
-      </Representation>
-    </AdaptationSet>
-    <AdaptationSet mimeType="audio/mp4" contentType="audio" lang="und" subsegmentAlignment="true" subsegmentStartsWithSAP="1">
-      <Representation id="audio" bandwidth="$audioBandwidth" codecs="$audioCodecs">
-        <BaseURL>$audioUrl</BaseURL>
-      </Representation>
-    </AdaptationSet>
-  </Period>
-</MPD>"""
-    }
 
     // Data Classes
     data class LoadData(val epId: String, val seasonId: String)
