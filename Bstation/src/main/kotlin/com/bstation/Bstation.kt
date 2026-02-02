@@ -241,19 +241,19 @@ class Bstation : MainAPI() {
                 val subUrl = sub.url ?: return@forEach
                 val subTitle = sub.title ?: sub.lang ?: "Unknown"
                 
-                // Convert JSON to SRT and serve as Data URI
+                // Convert JSON to WebVTT and serve as Data URI
                 try {
                     val jsonResponse = app.get(subUrl, headers = headers).text
                     val jsonSubtitle = AppUtils.parseJson<BiliSubtitleJson>(jsonResponse)
-                    val srtContent = convertJsonToSrt(jsonSubtitle)
+                    val vttContent = convertJsonToVtt(jsonSubtitle)
                     
-                    if (srtContent.isNotEmpty()) {
-                        val base64Srt = Base64.encodeToString(
-                            srtContent.toByteArray(Charsets.UTF_8),
+                    if (vttContent.isNotEmpty()) {
+                        val base64Vtt = Base64.encodeToString(
+                            vttContent.toByteArray(Charsets.UTF_8),
                             Base64.NO_WRAP
                         )
-                        val srtDataUri = "data:text/srt;base64,$base64Srt"
-                        subtitleCallback.invoke(SubtitleFile(subTitle, srtDataUri))
+                        val vttDataUri = "data:text/vtt;base64,$base64Vtt"
+                        subtitleCallback.invoke(SubtitleFile(subTitle, vttDataUri))
                     } else {
                         // Fallback to original JSON URL if conversion fails
                         subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
@@ -268,6 +268,30 @@ class Bstation : MainAPI() {
         return foundLinks
     }
 
+    // Helper function to convert Bstation JSON subtitle to WebVTT format
+    private fun convertJsonToVtt(jsonSub: BiliSubtitleJson?): String {
+        if (jsonSub?.body.isNullOrEmpty()) return ""
+        
+        val sb = StringBuilder()
+        sb.appendLine("WEBVTT")
+        sb.appendLine()
+        
+        jsonSub.body?.forEachIndexed { index, entry ->
+            val fromTime = formatVttTime(entry.from ?: 0.0)
+            val toTime = formatVttTime(entry.to ?: 0.0)
+            val content = entry.content ?: ""
+            
+            if (content.isNotEmpty()) {
+                sb.appendLine("${index + 1}")
+                sb.appendLine("$fromTime --> $toTime")
+                sb.appendLine(content)
+                sb.appendLine()
+            }
+        }
+        
+        return sb.toString()
+    }
+    
     // Helper function to convert Bstation JSON subtitle to SRT format
     private fun convertJsonToSrt(jsonSub: BiliSubtitleJson?): String {
         if (jsonSub?.body.isNullOrEmpty()) return ""
@@ -288,6 +312,16 @@ class Bstation : MainAPI() {
         }
         
         return sb.toString()
+    }
+    
+    // Format seconds to VTT timestamp (HH:MM:SS.mmm) - note: VTT uses dot
+    private fun formatVttTime(seconds: Double): String {
+        val totalSeconds = seconds.toInt()
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val secs = totalSeconds % 60
+        val millis = ((seconds - totalSeconds) * 1000).toInt()
+        return String.format("%02d:%02d:%02d.%03d", hours, minutes, secs, millis)
     }
     
     // Format seconds to SRT timestamp (HH:MM:SS,mmm) - note: SRT uses comma
