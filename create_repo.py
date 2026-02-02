@@ -1,14 +1,23 @@
 import os
 import json
+import zipfile
+
+def get_version_from_cs3(file_path):
+    """Extract version from manifest.json inside .cs3 (zip) file"""
+    try:
+        with zipfile.ZipFile(file_path, 'r') as z:
+            if 'manifest.json' in z.namelist():
+                with z.open('manifest.json') as f:
+                    manifest = json.load(f)
+                    return manifest.get('version', 1)
+    except Exception as e:
+        print(f"Warning: Could not read version from {file_path}: {e}")
+    return 1
 
 def generate_repo():
-    # Helper to get current repo info (or hardcode/env var)
-    # We assume the user follows the standard pattern: https://raw.githubusercontent.com/<USER>/<REPO>/builds
-    # We can try to read GITHUB_REPOSITORY env var if running in Actions
     github_repo = os.environ.get("GITHUB_REPOSITORY", "Makairamei/Cloudstream-Bstation")
     base_url = f"https://raw.githubusercontent.com/{github_repo}/builds"
     
-    # When running inside deploy_git, the files are in "."
     output_dir = "."
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -22,17 +31,17 @@ def generate_repo():
             name = filename.replace(".cs3", "")
             file_path = os.path.join(output_dir, filename)
             
-            # Simple metadata generation
-            # Ideally we would parse the .cs3 (zip) to get true metadata from AndroidManifest/Plugin class
-            # But for a quick fix, we use reasonable defaults.
+            # Extract version from manifest.json inside the .cs3 file
+            version = get_version_from_cs3(file_path)
+            print(f"Found {name} with version {version}")
             
             plugin = {
                 "name": name,
-                "internalName": f"com.{name.lower()}", # Convention used in code
-                "version": 1,
+                "internalName": f"com.{name.lower()}",
+                "version": version,  # Now reads from manifest!
                 "apiVersion": 1,
                 "url": f"{base_url}/{filename}",
-                "iconUrl": "https://raw.githubusercontent.com/recloudstream/cloudstream/master/app/src/main/ic_launcher-playstore.png", # Default Icon
+                "iconUrl": "https://raw.githubusercontent.com/recloudstream/cloudstream/master/app/src/main/ic_launcher-playstore.png",
                 "authors": ["Makairamei"],
                 "tvTypes": ["Anime", "Movie", "TvSeries"],
                 "description": f"{name} Extension for Cloudstream",
@@ -41,7 +50,7 @@ def generate_repo():
                 "language": "id"
             }
             plugins.append(plugin)
-            print(f"Added {name}")
+            print(f"Added {name} v{version}")
 
     # Write plugins.json
     plugins_path = os.path.join(output_dir, "plugins.json")
