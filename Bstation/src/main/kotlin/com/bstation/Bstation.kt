@@ -133,6 +133,7 @@ class Bstation : MainAPI() {
         }
     }
 
+    @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
