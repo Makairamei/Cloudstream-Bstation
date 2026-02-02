@@ -268,21 +268,81 @@ class Bstation : MainAPI() {
             } catch (_: Exception) {}
         }
 
-        // Fetch subtitles
+        // Fetch subtitles and convert JSON to VTT
         try {
             val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/episode?ep_id=$epId&platform=web&s_locale=id_ID"
             val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<EpisodeResult>()
             
             subRes?.data?.subtitles?.forEach { sub ->
                 val subUrl = sub.url ?: return@forEach
-                subtitleCallback.invoke(
-                    SubtitleFile(sub.title ?: sub.lang ?: "Unknown", subUrl)
-                )
+                val subTitle = sub.title ?: sub.lang ?: "Unknown"
+                
+                try {
+                    // Fetch JSON subtitle and convert to VTT
+                    val jsonSubtitle = app.get(subUrl, headers = headers).parsedSafe<BiliSubtitleJson>()
+                    val vttContent = convertJsonToVtt(jsonSubtitle)
+                    
+                    if (vttContent.isNotEmpty()) {
+                        // Create data URI for VTT content
+                        val vttDataUri = "data:text/vtt;base64," + android.util.Base64.encodeToString(
+                            vttContent.toByteArray(Charsets.UTF_8),
+                            android.util.Base64.NO_WRAP
+                        )
+                        subtitleCallback.invoke(SubtitleFile(subTitle, vttDataUri))
+                    }
+                } catch (e: Exception) {
+                    // Fallback: try using original URL directly
+                    subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
+                }
             }
         } catch (_: Exception) {}
 
         return foundLinks
     }
+
+    // Helper function to convert Bstation JSON subtitle to VTT format
+    private fun convertJsonToVtt(jsonSub: BiliSubtitleJson?): String {
+        if (jsonSub?.body.isNullOrEmpty()) return ""
+        
+        val sb = StringBuilder()
+        sb.appendLine("WEBVTT")
+        sb.appendLine()
+        
+        jsonSub.body?.forEachIndexed { index, entry ->
+            val fromTime = formatVttTime(entry.from ?: 0.0)
+            val toTime = formatVttTime(entry.to ?: 0.0)
+            val content = entry.content ?: ""
+            
+            if (content.isNotEmpty()) {
+                sb.appendLine("${index + 1}")
+                sb.appendLine("$fromTime --> $toTime")
+                sb.appendLine(content)
+                sb.appendLine()
+            }
+        }
+        
+        return sb.toString()
+    }
+    
+    // Format seconds to VTT timestamp (HH:MM:SS.mmm)
+    private fun formatVttTime(seconds: Double): String {
+        val totalSeconds = seconds.toInt()
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val secs = totalSeconds % 60
+        val millis = ((seconds - totalSeconds) * 1000).toInt()
+        return String.format("%02d:%02d:%02d.%03d", hours, minutes, secs, millis)
+    }
+
+    // Bstation JSON Subtitle format
+    data class BiliSubtitleJson(
+        @JsonProperty("body") val body: List<BiliSubtitleEntry>?
+    )
+    data class BiliSubtitleEntry(
+        @JsonProperty("from") val from: Double?,
+        @JsonProperty("to") val to: Double?,
+        @JsonProperty("content") val content: String?
+    )
 
     // Data Classes
     data class LoadData(val epId: String, val seasonId: String)
