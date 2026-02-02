@@ -135,12 +135,16 @@ class Bstation : MainAPI() {
         val playUrl = "$biliintlApiUrl/intl/gateway/web/playurl?ep_id=$epId&s_locale=id_ID&platform=android&qn=64"
         val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<BiliIntlPlayResult>()
         val playurl = res?.data?.playurl ?: return false
-        
-        val duration = playurl.duration ?: 0
 
-        // Get audio URL (use first available)
+        // Get audio tracks
         val audioResources = playurl.audioResource ?: emptyList()
-        val audioUrl = audioResources.firstOrNull()?.url
+        val audioTracks = audioResources.mapNotNull { audio ->
+            val audioUrl = audio.url ?: return@mapNotNull null
+            AudioFile(
+                url = audioUrl,
+                label = "Audio ${audio.quality ?: "Default"}"
+            )
+        }
 
         // Process video streams
         val videos = playurl.video ?: emptyList()
@@ -151,20 +155,16 @@ class Bstation : MainAPI() {
             if (videoUrl.isNullOrEmpty()) continue // Skip locked qualities
             
             val quality = videoItem.streamInfo?.descWords ?: "${videoResource.height ?: 0}P"
-            val width = videoResource.width ?: 0
-            val height = videoResource.height ?: 0
 
-            // Direct video URL approach (audio not supported in Cloudstream ExtractorLink)
-            // Note: Video will play without audio. For audio, use External Player.
-            {
-                // Fallback: video only
-                callback.invoke(
-                    newExtractorLink(this.name, "$name $quality (Video Only)", videoUrl, INFER_TYPE) {
-                        this.referer = "$mainUrl/"
-                        this.quality = getQualityFromName(quality)
-                    }
-                )
-            }
+            // Create ExtractorLink with audioTracks for audio support
+            callback.invoke(
+                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                    this.referer = "$mainUrl/"
+                    this.quality = getQualityFromName(quality)
+                    this.headers = this@Bstation.headers
+                    this.audioTracks = audioTracks
+                }
+            )
         }
 
         // Fetch subtitles from season API
@@ -187,7 +187,6 @@ class Bstation : MainAPI() {
 
         return true
     }
-
 
     // Data Classes
     data class LoadData(val epId: String, val seasonId: String)
