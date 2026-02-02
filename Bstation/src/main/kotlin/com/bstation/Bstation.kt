@@ -392,3 +392,4 @@ class Bstation : MainAPI() {
         @JsonProperty("quality") val quality: Int?
     )
 }
+
