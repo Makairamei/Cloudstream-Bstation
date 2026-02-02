@@ -132,7 +132,6 @@ class Bstation : MainAPI() {
             this.plot = description
         }
     }
-
     @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
@@ -143,114 +142,115 @@ class Bstation : MainAPI() {
         val loadData = try {
             parseJson<LoadData>(data)
         } catch (e: Exception) {
-            // If data is just episode ID string
             LoadData(data, "")
         }
         val epId = loadData.epId
         
-        // Use biliintl.com API which returns valid URLs for 480p and below
-        val playUrl = "$biliintlApiUrl/intl/gateway/web/playurl?ep_id=$epId&s_locale=id_ID&platform=android&qn=64"
-        val res = app.get(playUrl, headers = headers, cookies = cookies).parsedSafe<BiliIntlPlayResult>()
-        val playurl = res?.data?.playurl
+        var foundLinks = false
         
-        if (playurl == null) {
-            // Fallback to old API (bilibili.tv)
-            val oldPlayUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID"
-            val oldRes = app.get(oldPlayUrl, headers = headers, cookies = cookies).parsedSafe<OldPlayResult>()
+        // PRIMARY: Use bilibili.tv API (more reliable)
+        try {
+            val primaryUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID"
+            val primaryRes = app.get(primaryUrl, headers = headers, cookies = cookies).parsedSafe<OldPlayResult>()
+            val videoInfo = primaryRes?.result?.videoInfo
             
-            // Get audio from fallback API
-            val fallbackAudioUrl = oldRes?.result?.videoInfo?.dashAudio?.firstOrNull()?.baseUrl
-            
-            oldRes?.result?.videoInfo?.streamList?.forEach { stream ->
-                val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
-                val quality = stream.streamInfo?.displayDesc ?: "Unknown"
+            if (videoInfo != null) {
+                val audioUrl = videoInfo.dashAudio?.firstOrNull()?.baseUrl
                 
-                try {
-                    val audioFiles = if (!fallbackAudioUrl.isNullOrEmpty()) {
-                        listOf(newAudioFile(fallbackAudioUrl) {})
-                    } else emptyList()
+                videoInfo.streamList?.forEach { stream ->
+                    val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
+                    val quality = stream.streamInfo?.displayDesc ?: "Unknown"
                     
-                    callback.invoke(
-                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                            this.referer = "$mainUrl/"
-                            this.quality = getQualityFromName(quality)
-                            this.headers = this@Bstation.headers
-                            if (audioFiles.isNotEmpty()) this.audioTracks = audioFiles
-                        }
-                    )
-                } catch (e: Exception) {
-                    callback.invoke(
-                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                            this.referer = "$mainUrl/"
-                            this.quality = getQualityFromName(quality)
-                            this.headers = this@Bstation.headers
-                        }
-                    )
-                }
-            }
-            
-            oldRes?.result?.durl?.forEach { durl ->
-                val videoUrl = durl.url ?: return@forEach
-                callback.invoke(
-                    newExtractorLink(this.name, "$name Default", videoUrl, INFER_TYPE) {
-                        this.referer = "$mainUrl/"
-                        this.quality = Qualities.Unknown.value
-                        this.headers = this@Bstation.headers
+                    try {
+                        val audioFiles = if (!audioUrl.isNullOrEmpty()) {
+                            listOf(newAudioFile(audioUrl) {})
+                        } else emptyList()
+                        
+                        callback.invoke(
+                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                this.referer = "$mainUrl/"
+                                this.quality = getQualityFromName(quality)
+                                this.headers = this@Bstation.headers
+                                if (audioFiles.isNotEmpty()) this.audioTracks = audioFiles
+                            }
+                        )
+                        foundLinks = true
+                    } catch (e: Exception) {
+                        // Fallback without audio
+                        callback.invoke(
+                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                this.referer = "$mainUrl/"
+                                this.quality = getQualityFromName(quality)
+                                this.headers = this@Bstation.headers
+                            }
+                        )
+                        foundLinks = true
                     }
-                )
-            }
-            
-            return true
-        }
-
-        // Process video streams from biliintl API
-        val videos = playurl.video ?: emptyList()
-        val audios = playurl.audioResource ?: emptyList()
-        
-        // Get highest quality audio URL
-        val primaryAudioUrl = audios.maxByOrNull { it.bandwidth ?: 0 }?.url
-        
-        for (videoItem in videos) {
-            val videoResource = videoItem.videoResource ?: continue
-            val videoUrl = videoResource.url
-            if (videoUrl.isNullOrEmpty()) continue // Skip locked qualities
-            
-            val quality = videoItem.streamInfo?.descWords ?: "${videoResource.height ?: 0}P"
-
-            // Try to create ExtractorLink with audio tracks (pre-release feature)
-            try {
-                // Create audio file list
-                val audioFiles = if (!primaryAudioUrl.isNullOrEmpty()) {
-                    listOf(newAudioFile(primaryAudioUrl) {
-                        // Set audio properties if needed
-                    })
-                } else {
-                    emptyList()
                 }
                 
-                callback.invoke(
-                    newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                        this.referer = "$mainUrl/"
-                        this.quality = getQualityFromName(quality)
-                        this.headers = this@Bstation.headers
-                        if (audioFiles.isNotEmpty()) {
-                            this.audioTracks = audioFiles
+                // Also check durl
+                primaryRes.result?.durl?.forEach { durl ->
+                    val videoUrl = durl.url ?: return@forEach
+                    callback.invoke(
+                        newExtractorLink(this.name, "$name Direct", videoUrl, INFER_TYPE) {
+                            this.referer = "$mainUrl/"
+                            this.quality = Qualities.Unknown.value
+                            this.headers = this@Bstation.headers
+                        }
+                    )
+                    foundLinks = true
+                }
+            }
+        } catch (_: Exception) {}
+        
+        // FALLBACK: Use biliintl.com API if primary failed
+        if (!foundLinks) {
+            try {
+                val fallbackUrl = "$biliintlApiUrl/intl/gateway/web/playurl?ep_id=$epId&s_locale=id_ID&platform=android&qn=64"
+                val fallbackRes = app.get(fallbackUrl, headers = headers, cookies = cookies).parsedSafe<BiliIntlPlayResult>()
+                val playurl = fallbackRes?.data?.playurl
+                
+                if (playurl != null) {
+                    val videos = playurl.video ?: emptyList()
+                    val audioUrl = playurl.audioResource?.maxByOrNull { it.bandwidth ?: 0 }?.url
+                    
+                    for (videoItem in videos) {
+                        val videoResource = videoItem.videoResource ?: continue
+                        val videoUrl = videoResource.url
+                        if (videoUrl.isNullOrEmpty()) continue
+                        
+                        val quality = videoItem.streamInfo?.descWords ?: "${videoResource.height ?: 0}P"
+                        
+                        try {
+                            val audioFiles = if (!audioUrl.isNullOrEmpty()) {
+                                listOf(newAudioFile(audioUrl) {})
+                            } else emptyList()
+                            
+                            callback.invoke(
+                                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                    this.referer = "$mainUrl/"
+                                    this.quality = getQualityFromName(quality)
+                                    this.headers = this@Bstation.headers
+                                    if (audioFiles.isNotEmpty()) this.audioTracks = audioFiles
+                                }
+                            )
+                            foundLinks = true
+                        } catch (e: Exception) {
+                            callback.invoke(
+                                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                    this.referer = "$mainUrl/"
+                                    this.quality = getQualityFromName(quality)
+                                    this.headers = this@Bstation.headers
+                                }
+                            )
+                            foundLinks = true
                         }
                     }
-                )
-            } catch (e: Exception) {
-                // Fallback: Just video without audio tracks
-                callback.invoke(
-                    newExtractorLink(this.name, "$name $quality (Video Only)", videoUrl, INFER_TYPE) {
-                        this.referer = "$mainUrl/"
-                        this.quality = getQualityFromName(quality)
-                        this.headers = this@Bstation.headers
-                    }
-                )
-            }
+                }
+            } catch (_: Exception) {}
         }
 
-        // Fetch subtitles from Episode API (dedicated endpoint for subtitles)
+        // Fetch subtitles
         try {
             val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/episode?ep_id=$epId&platform=web&s_locale=id_ID"
             val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<EpisodeResult>()
@@ -263,7 +263,7 @@ class Bstation : MainAPI() {
             }
         } catch (_: Exception) {}
 
-        return true
+        return foundLinks
     }
 
     // Data Classes
