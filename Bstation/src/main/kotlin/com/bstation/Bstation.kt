@@ -141,9 +141,10 @@ class Bstation : MainAPI() {
         val audioResources = playurl.audioResource ?: emptyList()
         val audioTracks = audioResources.mapNotNull { audio ->
             val audioUrl = audio.url ?: return@mapNotNull null
-            // Use factory function newAudioFile because constructor is internal
-            // Guessing signature: newAudioFile(url, name)
-            newAudioFile(audioUrl, "Audio")
+            // newAudioFile uses suspend lambda builder pattern
+            newAudioFile(audioUrl) {
+                // Properties can be set here if needed
+            }
         }
 
         // Process video streams
