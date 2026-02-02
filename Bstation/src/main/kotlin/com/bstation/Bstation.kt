@@ -275,6 +275,7 @@ class Bstation : MainAPI() {
                 } catch (e: Exception) {
                     // Conversion failed, user still has JSON option
                 }
+            }
         } catch (_: Exception) {}
 
         return foundLinks
