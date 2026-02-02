@@ -1,5 +1,7 @@
 package com.bstation
 
+import android.util.Base64
+
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
@@ -228,13 +230,25 @@ class Bstation : MainAPI() {
                 val subUrl = sub.url ?: return@forEach
                 val subTitle = sub.title ?: sub.lang ?: "Unknown"
                 
-                // 1. Original JSON URL (in case player adds support)
+                // 1. Original JSON URL (Fallback)
                 subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
                 
-                // 2. Optimistic SRT/VTT (in case static file exists)
-                if (subUrl.endsWith(".json")) {
-                    subtitleCallback.invoke(SubtitleFile("$subTitle (Try SRT)", subUrl.replace(".json", ".srt")))
-                    subtitleCallback.invoke(SubtitleFile("$subTitle (Try VTT)", subUrl.replace(".json", ".vtt")))
+                // 2. Try Converting to SRT Data URI
+                try {
+                    // Start async-like fetch in try block
+                    val jsonSubtitle = app.get(subUrl, headers = headers).parsedSafe<BiliSubtitleJson>()
+                    val srtContent = convertJsonToSrt(jsonSubtitle)
+                    
+                    if (srtContent.isNotEmpty()) {
+                        val base64Content = Base64.encodeToString(
+                            srtContent.toByteArray(Charsets.UTF_8),
+                            Base64.NO_WRAP
+                        )
+                        val dataUri = "data:application/x-subrip;base64,$base64Content"
+                        subtitleCallback.invoke(SubtitleFile(subTitle, dataUri))
+                    }
+                } catch (e: Exception) {
+                    // If conversion fails, ignore (User still has JSON option)
                 }
             }
         } catch (_: Exception) {}
