@@ -1,5 +1,6 @@
 package com.bstation
 
+import android.util.Base64
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
@@ -240,8 +241,27 @@ class Bstation : MainAPI() {
                 val subUrl = sub.url ?: return@forEach
                 val subTitle = sub.title ?: sub.lang ?: "Unknown"
                 
-                // Original JSON URL only (No conversion)
-                subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
+                // Convert JSON to SRT and serve as Data URI
+                try {
+                    val jsonResponse = app.get(subUrl, headers = headers).text
+                    val jsonSubtitle = AppUtils.parseJson<BiliSubtitleJson>(jsonResponse)
+                    val srtContent = convertJsonToSrt(jsonSubtitle)
+                    
+                    if (srtContent.isNotEmpty()) {
+                        val base64Srt = Base64.encodeToString(
+                            srtContent.toByteArray(Charsets.UTF_8),
+                            Base64.NO_WRAP
+                        )
+                        val srtDataUri = "data:text/srt;base64,$base64Srt"
+                        subtitleCallback.invoke(SubtitleFile(subTitle, srtDataUri))
+                    } else {
+                        // Fallback to original JSON URL if conversion fails
+                        subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
+                    }
+                } catch (e: Exception) {
+                    // Fallback to original JSON URL on error
+                    subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
+                }
             }
         } catch (_: Exception) {}
 
