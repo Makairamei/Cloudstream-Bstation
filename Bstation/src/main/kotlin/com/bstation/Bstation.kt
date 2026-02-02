@@ -203,17 +203,12 @@ class Bstation : MainAPI() {
             )
         }
 
-        // Fetch subtitles from season API
+        // Fetch subtitles from Episode API (dedicated endpoint for subtitles)
         try {
-            val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/season?ep_id=$epId&platform=web&s_locale=id_ID"
-            val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<SeasonResult>()
+            val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/episode?ep_id=$epId&platform=web&s_locale=id_ID"
+            val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<EpisodeResult>()
             
-            val allEps = mutableListOf<EpisodeData>()
-            subRes?.result?.episodes?.let { allEps.addAll(it) }
-            subRes?.result?.modules?.forEach { m -> m.data?.episodes?.let { allEps.addAll(it) } }
-            
-            val currentEp = allEps.find { it.id.toString() == epId }
-            currentEp?.subtitles?.forEach { sub ->
+            subRes?.data?.subtitles?.forEach { sub ->
                 val subUrl = sub.url ?: return@forEach
                 subtitleCallback.invoke(
                     SubtitleFile(sub.title ?: sub.lang ?: "Unknown", subUrl)
@@ -271,6 +266,10 @@ class Bstation : MainAPI() {
         @JsonProperty("title") val title: String?,
         @JsonProperty("url") val url: String?
     )
+
+    // Episode API (for subtitles)
+    data class EpisodeResult(@JsonProperty("data") val data: EpisodeApiData?)
+    data class EpisodeApiData(@JsonProperty("subtitles") val subtitles: List<SubtitleData>?)
 
     // Old Play API (fallback)
     data class OldPlayResult(@JsonProperty("result") val result: OldPlayData?)
