@@ -307,6 +307,12 @@ class Bstation : MainAPI() {
             }
         } catch (_: Exception) {}
 
+        // Debug: Test HTTP URL subtitle (Build 62)
+        subtitleCallback.invoke(SubtitleFile(
+            "⭐ Debug HTTP Test ⭐",
+            "https://raw.githubusercontent.com/Makairamei/Cloudstream-Bstation/main/test_subtitle.srt"
+        ))
+
         return foundLinks
     }
 
