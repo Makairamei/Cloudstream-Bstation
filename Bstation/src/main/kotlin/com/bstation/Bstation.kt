@@ -306,12 +306,23 @@ class Bstation : MainAPI() {
             }
         } catch (_: Exception) {}
 
-        // Add Debug Subtitle Track (to verify file cache system)
+        // EXPERIMENT: 3 Debug Tracks for Build 60 (v10)
         try {
-            val debugContent = "1\n00:00:00,000 --> 00:00:05,000\nSuccess! Subtitle System Working\n\n2\n00:00:05,000 --> 00:00:10,000\nIf you see this, file cache is OK"
-            val debugFile = File.createTempFile("bstation_debug_", ".srt")
-            debugFile.writeText(debugContent)
-            subtitleCallback.invoke(SubtitleFile("Debug Test (SRT)", debugFile.toURI().toString()))
+            // Track 1: Data URI SRT (application/x-subrip)
+            val srtText = "1\n00:00:00,000 --> 00:00:05,000\nDebug DataURI SRT Works!"
+            val b64Srt = java.util.Base64.getEncoder().encodeToString(srtText.toByteArray())
+            subtitleCallback.invoke(SubtitleFile("Debug 1: DataURI SRT", "data:application/x-subrip;base64,$b64Srt"))
+
+            // Track 2: Data URI VTT (text/vtt)
+            val vttText = "WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nDebug DataURI VTT Works!"
+            val b64Vtt = java.util.Base64.getEncoder().encodeToString(vttText.toByteArray())
+            subtitleCallback.invoke(SubtitleFile("Debug 2: DataURI VTT", "data:text/vtt;base64,$b64Vtt"))
+            
+            // Track 3: Data URI Plain (text/plain)
+            val plainText = "1\n00:00:00,000 --> 00:00:05,000\nDebug DataURI Plain Works!"
+            val b64Plain = java.util.Base64.getEncoder().encodeToString(plainText.toByteArray())
+            subtitleCallback.invoke(SubtitleFile("Debug 3: DataURI Plain", "data:text/plain;base64,$b64Plain"))
+
         } catch (_: Exception) {}
 
         return foundLinks
