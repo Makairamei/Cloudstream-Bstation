@@ -132,7 +132,6 @@ class Bstation : MainAPI() {
             this.plot = description
         }
     }
-    @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -152,44 +151,26 @@ class Bstation : MainAPI() {
         try {
             val primaryUrl = "$apiUrl/intl/gateway/v2/ogv/playurl?ep_id=$epId&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID"
             val primaryRes = app.get(primaryUrl, headers = headers, cookies = cookies).parsedSafe<OldPlayResult>()
-            val videoInfo = primaryRes?.data?.videoInfo  // Changed from result to data
+            val videoInfo = primaryRes?.data?.videoInfo
             
             if (videoInfo != null) {
-                val audioUrl = videoInfo.dashAudio?.firstOrNull()?.baseUrl
-                
                 videoInfo.streamList?.forEach { stream ->
                     val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
                     val quality = stream.streamInfo?.displayDesc ?: "Unknown"
                     
-                    try {
-                        val audioFiles = if (!audioUrl.isNullOrEmpty()) {
-                            listOf(newAudioFile(audioUrl) {})
-                        } else emptyList()
-                        
-                        callback.invoke(
-                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                                this.referer = "$mainUrl/"
-                                this.quality = getQualityFromName(quality)
-                                this.headers = this@Bstation.headers
-                                if (audioFiles.isNotEmpty()) this.audioTracks = audioFiles
-                            }
-                        )
-                        foundLinks = true
-                    } catch (e: Exception) {
-                        // Fallback without audio
-                        callback.invoke(
-                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                                this.referer = "$mainUrl/"
-                                this.quality = getQualityFromName(quality)
-                                this.headers = this@Bstation.headers
-                            }
-                        )
-                        foundLinks = true
-                    }
+                    // Simple callback without audio (for stability on 4.6.0)
+                    callback.invoke(
+                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                            this.referer = "$mainUrl/"
+                            this.quality = getQualityFromName(quality)
+                            this.headers = this@Bstation.headers
+                        }
+                    )
+                    foundLinks = true
                 }
                 
                 // Also check durl
-                primaryRes.data?.durl?.forEach { durl ->  // Changed from result to data
+                primaryRes.data?.durl?.forEach { durl ->
                     val videoUrl = durl.url ?: return@forEach
                     callback.invoke(
                         newExtractorLink(this.name, "$name Direct", videoUrl, INFER_TYPE) {
@@ -212,7 +193,6 @@ class Bstation : MainAPI() {
                 
                 if (playurl != null) {
                     val videos = playurl.video ?: emptyList()
-                    val audioUrl = playurl.audioResource?.maxByOrNull { it.bandwidth ?: 0 }?.url
                     
                     for (videoItem in videos) {
                         val videoResource = videoItem.videoResource ?: continue
@@ -221,30 +201,14 @@ class Bstation : MainAPI() {
                         
                         val quality = videoItem.streamInfo?.descWords ?: "${videoResource.height ?: 0}P"
                         
-                        try {
-                            val audioFiles = if (!audioUrl.isNullOrEmpty()) {
-                                listOf(newAudioFile(audioUrl) {})
-                            } else emptyList()
-                            
-                            callback.invoke(
-                                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                                    this.referer = "$mainUrl/"
-                                    this.quality = getQualityFromName(quality)
-                                    this.headers = this@Bstation.headers
-                                    if (audioFiles.isNotEmpty()) this.audioTracks = audioFiles
-                                }
-                            )
-                            foundLinks = true
-                        } catch (e: Exception) {
-                            callback.invoke(
-                                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                                    this.referer = "$mainUrl/"
-                                    this.quality = getQualityFromName(quality)
-                                    this.headers = this@Bstation.headers
-                                }
-                            )
-                            foundLinks = true
-                        }
+                        callback.invoke(
+                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                this.referer = "$mainUrl/"
+                                this.quality = getQualityFromName(quality)
+                                this.headers = this@Bstation.headers
+                            }
+                        )
+                        foundLinks = true
                     }
                 }
             } catch (_: Exception) {}
