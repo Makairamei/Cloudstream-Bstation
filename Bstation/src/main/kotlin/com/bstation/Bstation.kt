@@ -122,6 +122,7 @@ class Bstation : MainAPI() {
         }
     }
 
+    @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -140,10 +141,8 @@ class Bstation : MainAPI() {
         val audioResources = playurl.audioResource ?: emptyList()
         val audioTracks = audioResources.mapNotNull { audio ->
             val audioUrl = audio.url ?: return@mapNotNull null
-            AudioFile(
-                url = audioUrl,
-                label = "Audio ${audio.quality ?: "Default"}"
-            )
+            // AudioFile constructor guess: (url, lang)
+            AudioFile(audioUrl, "Audio")
         }
 
         // Process video streams
