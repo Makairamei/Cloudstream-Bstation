@@ -1,6 +1,5 @@
 package com.bstation
 
-import android.util.Base64
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
@@ -17,6 +16,7 @@ class Bstation : MainAPI() {
 
     private val apiUrl = "https://api.bilibili.tv"
     private val biliintlApiUrl = "https://api.biliintl.com"
+    private val subtitleProxyUrl = "https://bstation-subtitle.makairamei.workers.dev"
 
     private val cookies = mapOf(
         "SESSDATA" to "a97adc61%2C1785509852%2Cdd028%2A210091",
@@ -241,27 +241,9 @@ class Bstation : MainAPI() {
                 val subUrl = sub.url ?: return@forEach
                 val subTitle = sub.title ?: sub.lang ?: "Unknown"
                 
-                // Convert JSON to WebVTT and serve as Data URI
-                try {
-                    val jsonResponse = app.get(subUrl, headers = headers).text
-                    val jsonSubtitle = AppUtils.parseJson<BiliSubtitleJson>(jsonResponse)
-                    val vttContent = convertJsonToVtt(jsonSubtitle)
-                    
-                    if (vttContent.isNotEmpty()) {
-                        val base64Vtt = Base64.encodeToString(
-                            vttContent.toByteArray(Charsets.UTF_8),
-                            Base64.NO_WRAP
-                        )
-                        val vttDataUri = "data:text/vtt;base64,$base64Vtt"
-                        subtitleCallback.invoke(SubtitleFile(subTitle, vttDataUri))
-                    } else {
-                        // Fallback to original JSON URL if conversion fails
-                        subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
-                    }
-                } catch (e: Exception) {
-                    // Fallback to original JSON URL on error
-                    subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
-                }
+                // Use Subtitle Proxy to convert JSON to VTT
+                val proxyUrl = "$subtitleProxyUrl/?url=${java.net.URLEncoder.encode(subUrl, "UTF-8")}"
+                subtitleCallback.invoke(SubtitleFile(subTitle, proxyUrl))
             }
         } catch (_: Exception) {}
 
