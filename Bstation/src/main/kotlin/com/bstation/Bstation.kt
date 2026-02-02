@@ -132,6 +132,7 @@ class Bstation : MainAPI() {
             this.plot = description
         }
     }
+    @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -177,24 +178,46 @@ class Bstation : MainAPI() {
                     foundLinks = true
                 }
                 
-                // 2. Process streamList but ONLY Muxed (baseUrl)
-                // Ignore dashVideo (Split/Silent) entirely on Stable.
+                // 2. Process streamList (DASH/Split)
+                // Use SAFETY CATCH for audio merging to support both Stable and Pre-release
                  videoInfo.streamList?.forEach { stream ->
-                    // Reject DASH Video (Silent)
-                    if (stream.dashVideo != null) return@forEach
+                    val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
+                    var quality = stream.streamInfo?.displayDesc ?: "Unknown"
+                    var audioFiles: List<AudioTrack> = emptyList()
+                    var hasAudio = false
                     
-                    // Accept Direct MP4 (Muxed)
-                    val videoUrl = stream.baseUrl ?: return@forEach
+                    // Try to merge audio (Prerelease Feature)
+                    // Must catch THROWABLE to handle NoSuchMethodError on Stable
+                    if (!audioUrl.isNullOrEmpty()) {
+                        try {
+                             audioFiles = listOf(newAudioFile(audioUrl) {})
+                             hasAudio = true
+                        } catch (t: Throwable) {
+                            // Stable Version: Cannot merge audio.
+                            // Mark as "No Audio" so user knows.
+                        }
+                    }
+
+                    // Strict Deduplication:
+                    // Only skip if we already added this exact quality label.
+                    // If one is "1080P (Direct)" and this is "1080P (No Audio)", both actally show up.
                     
-                    val qualityStr = stream.streamInfo?.displayDesc ?: "Unknown"
-                    if (addedQualities.contains(qualityStr)) return@forEach
-                    addedQualities.add(qualityStr)
+                    // Modify quality label if silent
+                    if (!audioUrl.isNullOrEmpty() && !hasAudio) {
+                        quality = "$quality (No Audio)"
+                    }
+                    
+                    if (addedQualities.contains(quality)) return@forEach
+                    addedQualities.add(quality)
 
                     callback.invoke(
-                        newExtractorLink(this.name, "$name $qualityStr", videoUrl, INFER_TYPE) {
+                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
                             this.referer = "$mainUrl/"
-                            this.quality = getQualityFromName(qualityStr)
+                            this.quality = getQualityFromName(quality)
                             this.headers = this@Bstation.headers
+                            if (hasAudio) {
+                                this.audioTracks = audioFiles
+                            }
                         }
                     )
                     foundLinks = true
