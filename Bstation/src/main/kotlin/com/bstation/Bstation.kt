@@ -1,5 +1,7 @@
 package com.bstation
 
+import android.util.Base64
+
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
@@ -178,37 +180,36 @@ class Bstation : MainAPI() {
                     foundLinks = true
                 }
                 
-                // 2. Process streamList (DASH/Split)
-                // Stable Version: Cannot merge audio (newAudioFile is missing).
-                // Strategy: Show links but label them "(No Audio)" if split.
+                // 2. Process streamList (DASH/Split) with Audio Merging
                  videoInfo.streamList?.forEach { stream ->
                     val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
-                    var quality = stream.streamInfo?.displayDesc ?: "Unknown"
-                    var hasAudio = false
-                    
-                    // Check if audio is split
-                    if (!audioUrl.isNullOrEmpty()) {
-                         // Split audio detected. On Stable, we can't join it.
-                         // Label clearly.
-                         quality = "$quality (No Audio)"
-                    } else {
-                        // If audioUrl is null, maybe it is muxed?
-                        // Leave quality as is.
-                        hasAudio = true
-                    }
+                    val quality = stream.streamInfo?.displayDesc ?: "Unknown"
 
-                    // Strict Deduplication:
-                    // Only skip if we already added this exact quality label.
+                    // Strict Deduplication
                     if (addedQualities.contains(quality)) return@forEach
                     addedQualities.add(quality)
 
-                    callback.invoke(
-                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                            this.referer = "$mainUrl/"
-                            this.quality = getQualityFromName(quality)
-                            this.headers = this@Bstation.headers
-                        }
-                    )
+                    // Merge Audio using Pre-release API
+                    if (!audioUrl.isNullOrEmpty()) {
+                        val audioFiles = listOf(newAudioFile(audioUrl) {})
+                        callback.invoke(
+                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                this.referer = "$mainUrl/"
+                                this.quality = getQualityFromName(quality)
+                                this.headers = this@Bstation.headers
+                                this.audioTracks = audioFiles
+                            }
+                        )
+                    } else {
+                        // No separate audio, assume muxed
+                        callback.invoke(
+                            newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                this.referer = "$mainUrl/"
+                                this.quality = getQualityFromName(quality)
+                                this.headers = this@Bstation.headers
+                            }
+                        )
+                    }
                     foundLinks = true
                 }
             }
@@ -258,8 +259,22 @@ class Bstation : MainAPI() {
                 // 1. Original JSON URL (Fallback)
                 subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
                 
-
-            }
+                // 2. Convert JSON to SRT Data URI
+                try {
+                    val jsonSubtitle = app.get(subUrl, headers = headers).parsedSafe<BiliSubtitleJson>()
+                    val srtContent = convertJsonToSrt(jsonSubtitle)
+                    
+                    if (srtContent.isNotEmpty()) {
+                        val base64Content = Base64.encodeToString(
+                            srtContent.toByteArray(Charsets.UTF_8),
+                            Base64.NO_WRAP
+                        )
+                        val dataUri = "data:application/x-subrip;base64,$base64Content"
+                        subtitleCallback.invoke(SubtitleFile(subTitle, dataUri))
+                    }
+                } catch (e: Exception) {
+                    // Conversion failed, user still has JSON option
+                }
         } catch (_: Exception) {}
 
         return foundLinks
