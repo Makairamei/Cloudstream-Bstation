@@ -271,7 +271,7 @@ class Bstation : MainAPI() {
             } catch (_: Exception) {}
         }
 
-        // Fetch subtitles and convert JSON to SRT
+        // Fetch subtitles
         try {
             val subApiUrl = "$apiUrl/intl/gateway/v2/ogv/view/app/episode?ep_id=$epId&platform=web&s_locale=id_ID"
             val subRes = app.get(subApiUrl, headers = headers, cookies = cookies).parsedSafe<EpisodeResult>()
@@ -280,38 +280,16 @@ class Bstation : MainAPI() {
                 val subUrl = sub.url ?: return@forEach
                 val subTitle = sub.title ?: sub.lang ?: "Unknown"
                 
-                try {
-                    // Fetch JSON subtitle (Headers restored to avoid CDN 403)
-                    val jsonSubtitle = app.get(subUrl, headers = headers).parsedSafe<BiliSubtitleJson>()
-                    val srtContent = convertJsonToSrt(jsonSubtitle)
-                    
-                    if (srtContent.isNotEmpty()) {
-                        try {
-                            // Try Data URI with specific MIME type (application/x-subrip)
-                            // Use android.util.Base64 for compatibility
-                            val base64Content = Base64.encodeToString(
-                                srtContent.toByteArray(Charsets.UTF_8),
-                                Base64.NO_WRAP
-                            )
-                            val srtDataUri = "data:application/x-subrip;base64,$base64Content"
-                            subtitleCallback.invoke(SubtitleFile(subTitle, srtDataUri))
-                        } catch (e: Exception) {
-                            // Only fallback to URL if encoding fails
-                            subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Fallback to original URL
-                    subtitleCallback.invoke(SubtitleFile(subTitle, subUrl))
+                // 1. Original JSON URL (in case player adds support)
+                subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
+                
+                // 2. Optimistic SRT/VTT (in case static file exists)
+                if (subUrl.endsWith(".json")) {
+                    subtitleCallback.invoke(SubtitleFile("$subTitle (Try SRT)", subUrl.replace(".json", ".srt")))
+                    subtitleCallback.invoke(SubtitleFile("$subTitle (Try VTT)", subUrl.replace(".json", ".vtt")))
                 }
             }
         } catch (_: Exception) {}
-
-        // Debug: Test HTTP URL subtitle (Build 62)
-        subtitleCallback.invoke(SubtitleFile(
-            "⭐ Debug HTTP Test ⭐",
-            "https://raw.githubusercontent.com/Makairamei/Cloudstream-Bstation/main/test_subtitle.srt"
-        ))
 
         return foundLinks
     }
