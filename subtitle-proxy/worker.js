@@ -34,11 +34,12 @@ async function handleRequest(request) {
     }
 
     try {
-        // Validate URL is from Bstation
+        // Validate URL is from Bstation/Bilibili CDN
         const parsedUrl = new URL(subtitleUrl)
         if (!parsedUrl.hostname.includes('bstation') &&
             !parsedUrl.hostname.includes('bilibili') &&
-            !parsedUrl.hostname.includes('akamaized')) {
+            !parsedUrl.hostname.includes('akamaized') &&
+            !parsedUrl.hostname.includes('bstarstatic')) {
             return new Response('Invalid subtitle URL. Only Bstation/Bilibili URLs are allowed.', {
                 status: 403,
                 headers: { ...corsHeaders, 'Content-Type': 'text/plain' }
@@ -49,7 +50,7 @@ async function handleRequest(request) {
         const response = await fetch(subtitleUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://www.bstation.tv/'
+                'Referer': 'https://www.bilibili.tv/'
             }
         })
 

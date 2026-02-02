@@ -133,6 +133,7 @@ class Bstation : MainAPI() {
             this.plot = description
         }
     }
+    @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -178,7 +179,7 @@ class Bstation : MainAPI() {
                     foundLinks = true
                 }
                 
-                // 2. Process streamList - SIMPLE MODE (No Audio Merging)
+                // 2. Process streamList (DASH) - Add Audio for Pre-release
                  videoInfo.streamList?.forEach { stream ->
                     val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
                     val quality = stream.streamInfo?.displayDesc ?: "Unknown"
@@ -187,7 +188,26 @@ class Bstation : MainAPI() {
                     if (addedQualities.contains(quality)) return@forEach
                     addedQualities.add(quality)
 
-                    // Simple video link without audio merging
+                    // Try to merge audio (Pre-release feature)
+                    try {
+                        if (!audioUrl.isNullOrEmpty()) {
+                            val audioFiles = listOf(newAudioFile(audioUrl) {})
+                            callback.invoke(
+                                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                    this.referer = "$mainUrl/"
+                                    this.quality = getQualityFromName(quality)
+                                    this.headers = this@Bstation.headers
+                                    this.audioTracks = audioFiles
+                                }
+                            )
+                            foundLinks = true
+                            return@forEach
+                        }
+                    } catch (_: Throwable) {
+                        // Pre-release feature not available, fallback to video-only
+                    }
+
+                    // Fallback: Video without audio merging
                     callback.invoke(
                         newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
                             this.referer = "$mainUrl/"
