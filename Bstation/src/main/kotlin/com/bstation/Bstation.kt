@@ -1,7 +1,5 @@
 package com.bstation
 
-import android.util.Base64
-
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
@@ -159,28 +157,36 @@ class Bstation : MainAPI() {
                 // Get audio URL
                 val audioUrl = videoInfo.dashAudio?.firstOrNull()?.baseUrl
                 
-                videoInfo.streamList?.forEach { stream ->
-                    val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
-                    val quality = stream.streamInfo?.displayDesc ?: "Unknown"
-                    
-                    // Stable Video Link (No Audio/Prerelease logic)
-                    callback.invoke(
-                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
-                            this.referer = "$mainUrl/"
-                            this.quality = getQualityFromName(quality)
-                            this.headers = this@Bstation.headers
-                        }
-                    )
-                    foundLinks = true
-                }
-                
-                // Also check durl
+                // Prioritize Muxed (durl) streams which have Audio+Video guaranteed
                 primaryRes.data?.durl?.forEach { durl ->
                     val videoUrl = durl.url ?: return@forEach
                     callback.invoke(
                         newExtractorLink(this.name, "$name Direct", videoUrl, INFER_TYPE) {
                             this.referer = "$mainUrl/"
                             this.quality = Qualities.Unknown.value
+                            this.headers = this@Bstation.headers
+                        }
+                    )
+                    foundLinks = true
+                }
+                
+                // Process DASH/Split streams ONLY if we can support them (e.g. if they are muxed or we have API)
+                // Currently on Stable, we CANNOT support split audio without newAudioFile (which crashes).
+                // So we MUST SKIP split streams to avoid "Silent Video".
+                 videoInfo.streamList?.forEach { stream ->
+                    val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
+                    val quality = stream.streamInfo?.displayDesc ?: "Unknown"
+                    
+                    // If audio is separate, SKIP this stream on Stable
+                    if (!audioUrl.isNullOrEmpty()) {
+                         return@forEach
+                    }
+
+                    // If we are here, it's likely a muxed stream or audioUrl was null
+                    callback.invoke(
+                        newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                            this.referer = "$mainUrl/"
+                            this.quality = getQualityFromName(quality)
                             this.headers = this@Bstation.headers
                         }
                     )
@@ -233,22 +239,8 @@ class Bstation : MainAPI() {
                 // 1. Original JSON URL (Fallback)
                 subtitleCallback.invoke(SubtitleFile("$subTitle (JSON)", subUrl))
                 
-                // 2. Try Converting to SRT Data URI
-                try {
-                    // Start async-like fetch in try block
-                    val jsonSubtitle = app.get(subUrl, headers = headers).parsedSafe<BiliSubtitleJson>()
-                    val srtContent = convertJsonToSrt(jsonSubtitle)
-                    
-                    if (srtContent.isNotEmpty()) {
-                        val base64Content = Base64.encodeToString(
-                            srtContent.toByteArray(Charsets.UTF_8),
-                            Base64.NO_WRAP
-                        )
-                        val dataUri = "data:application/x-subrip;base64,$base64Content"
-                        subtitleCallback.invoke(SubtitleFile(subTitle, dataUri))
-                    }
                 } catch (e: Exception) {
-                    // If conversion fails, ignore (User still has JSON option)
+                    // Ignore Data URI errors
                 }
             }
         } catch (_: Exception) {}
