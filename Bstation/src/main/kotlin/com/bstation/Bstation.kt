@@ -141,8 +141,8 @@ class Bstation : MainAPI() {
         val audioResources = playurl.audioResource ?: emptyList()
         val audioTracks = audioResources.mapNotNull { audio ->
             val audioUrl = audio.url ?: return@mapNotNull null
-            // AudioFile constructor guess: (url, headers, lang)
-            AudioFile(audioUrl, null, "Audio")
+            // AudioFile constructor: (url: String, headers: Map<String, String>?)
+            AudioFile(audioUrl, null)
         }
 
         // Process video streams
