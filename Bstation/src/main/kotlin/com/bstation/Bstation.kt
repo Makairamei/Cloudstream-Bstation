@@ -19,11 +19,11 @@ class Bstation : MainAPI() {
     private val subtitleProxyUrl = "https://bstation-subtitle.cf1-e6a.workers.dev"
 
     private val cookies = mapOf(
-        "SESSDATA" to "a97adc61%2C1785509852%2Cdd028%2A210091",
-        "bili_jct" to "bca5203c3f1cda514530500a8ca0fc10",
+        "SESSDATA" to "d3e2b1e9%2C1785599046%2Cbe897%2A210091",
+        "bili_jct" to "c354fd55e047c9b7daddc250b5004972",
         "DedeUserID" to "1709563281",
-        "buvid3" to "ddbadfe4-0540-43ce-b22d-5644f59fded314589infoc",
-        "buvid4" to "59AD9169-1B99-2A66-E0D3-9A6E759A1FB782033-026011921-q8GoWR2UlMAMBjSSRABQgw%3D%3D",
+        "buvid3" to "f165a4d3-71ca-42fb-aa5a-956c0eae673a44290infoc",
+        "buvid4" to "193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA%3D%3D",
         "bstar-web-lang" to "en"
     )
 
@@ -72,7 +72,7 @@ class Bstation : MainAPI() {
                         val seasonId = item.seasonId ?: return@forEach
                         
                         items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
-                            this.posterUrl = item.cover
+                            this.posterUrl = item.cover ?: item.poster ?: item.horizontalCover
                         })
                     }
                 }
@@ -88,7 +88,7 @@ class Bstation : MainAPI() {
                         val seasonId = item.seasonId ?: return@forEach
                         
                         items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
-                            this.posterUrl = item.cover
+                            this.posterUrl = item.cover ?: item.poster ?: item.horizontalCover
                         })
                     }
                 }
@@ -104,7 +104,7 @@ class Bstation : MainAPI() {
                         val seasonId = item.seasonId ?: return@forEach
                         
                         items.add(newAnimeSearchResponse(title, seasonId, TvType.Anime) {
-                            this.posterUrl = item.cover
+                            this.posterUrl = item.cover ?: item.poster ?: item.horizontalCover
                         })
                     }
                 }
@@ -405,7 +405,9 @@ class Bstation : MainAPI() {
     data class SearchItem(
         @JsonProperty("title") val title: String?,
         @JsonProperty("season_id") val seasonId: String?,
-        @JsonProperty("cover") val cover: String?
+        @JsonProperty("cover") val cover: String?,
+        @JsonProperty("poster") val poster: String?,
+        @JsonProperty("horizontal_cover") val horizontalCover: String?
     )
 
     // Season API
