@@ -148,9 +148,13 @@ class Bstation : MainAPI() {
         
         result.modules?.forEach { module ->
             module.data?.episodes?.forEach { ep ->
+                // Use index_show first, then try title if it's a number, then use list index
+                val epNum = (ep.index?.toIntOrNull()) ?: (ep.title?.toIntOrNull())
+                val epName = if (ep.title?.toIntOrNull() != null) "Episode ${ep.title}" else (ep.title ?: "Episode ${epNum ?: "?"}")
+                
                 episodes.add(newEpisode(LoadData(ep.id.toString(), seasonId).toJson()) {
-                    this.name = ep.title ?: "Episode ${ep.index}"
-                    this.episode = ep.index?.toIntOrNull()
+                    this.name = epName
+                    this.episode = epNum ?: (episodes.size + 1)
                     this.posterUrl = ep.cover
                 })
             }
@@ -158,9 +162,12 @@ class Bstation : MainAPI() {
 
         result.episodes?.forEach { ep ->
             if (episodes.none { parseJson<LoadData>(it.data).epId == ep.id.toString() }) {
+                val epNum = (ep.index?.toIntOrNull()) ?: (ep.title?.toIntOrNull())
+                val epName = if (ep.title?.toIntOrNull() != null) "Episode ${ep.title}" else (ep.title ?: "Episode ${epNum ?: "?"}")
+                
                 episodes.add(newEpisode(LoadData(ep.id.toString(), seasonId).toJson()) {
-                    this.name = ep.title ?: "Episode ${ep.index}"
-                    this.episode = ep.index?.toIntOrNull()
+                    this.name = epName
+                    this.episode = epNum ?: (episodes.size + 1)
                     this.posterUrl = ep.cover
                 })
             }
