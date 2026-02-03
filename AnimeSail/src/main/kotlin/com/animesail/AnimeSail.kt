@@ -26,7 +26,7 @@ class AnimeSail : ParsedHttpSource() {
         "$baseUrl/movie-terbaru/page/" to "Movie Terbaru"
     )
 
-    override fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = request.data + page
         val document = app.get(url, cookies = cookies).document
         
@@ -44,7 +44,7 @@ class AnimeSail : ParsedHttpSource() {
         return newHomePageResponse(request.name, home)
     }
 
-    override fun search(query: String): List<SearchResponse> {
+    override suspend fun search(query: String): List<SearchResponse> {
         val url = "$baseUrl/?s=$query"
         val document = app.get(url, cookies = cookies).document
 
@@ -59,7 +59,7 @@ class AnimeSail : ParsedHttpSource() {
         }
     }
 
-    override fun load(url: String): LoadResponse {
+    override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, cookies = cookies).document
         
         // Handle "Episode" page -> Redirect to parent Anime page if possible
@@ -111,7 +111,7 @@ class AnimeSail : ParsedHttpSource() {
         }
     }
 
-    override fun loadLinks(
+    override suspend fun loadLinks(
         url: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -146,7 +146,7 @@ class AnimeSail : ParsedHttpSource() {
         return true
     }
 
-    private fun tryDecodeAndLoad(
+    private suspend fun tryDecodeAndLoad(
         raw: String, 
         callback: (ExtractorLink) -> Unit, 
         subtitleCallback: (SubtitleFile) -> Unit
@@ -175,7 +175,7 @@ class AnimeSail : ParsedHttpSource() {
         } catch (_: Exception) {}
     }
 
-    private fun fixAndLoad(
+    private suspend fun fixAndLoad(
         url: String, 
         callback: (ExtractorLink) -> Unit, 
         subtitleCallback: (SubtitleFile) -> Unit

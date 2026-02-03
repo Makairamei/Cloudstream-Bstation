@@ -4,8 +4,8 @@ cloudstream {
     description = "AnimeSail - Streaming Download Anime Subtitle Indonesia"
     language = "id"
     isNsfw = false
-    authors = "Makairamei"
-    tvTypes = "Anime,Movie,TvSeries"
+    authors = listOf("Makairamei")
+    tvTypes = listOf("Anime", "Movie", "TvSeries")
 }
 
 android {
