@@ -4,9 +4,9 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.mvvm.safeApiCall
+import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.nicehttp.NiceResponse
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -26,6 +26,8 @@ class AnimeSail : MainAPI() {
         TvType.OVA
     )
 
+    private val cfKiller by lazy { CloudflareKiller() }
+
     companion object {
         fun getType(t: String): TvType {
             return if (t.contains("OVA", true) || t.contains("Special")) TvType.OVA
@@ -42,13 +44,17 @@ class AnimeSail : MainAPI() {
         }
     }
 
-    private suspend fun request(url: String, ref: String? = null): NiceResponse {
-        return app.get(
+    private suspend fun cfRequest(url: String): org.jsoup.nodes.Document {
+        val response = app.get(
             url,
-            headers = mapOf("Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
+            headers = mapOf(
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language" to "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7"
+            ),
             cookies = mapOf("_as_ipin_ct" to "ID"),
-            referer = ref
+            interceptor = cfKiller
         )
+        return response.document
     }
 
     override val mainPage = mainPageOf(
@@ -58,7 +64,7 @@ class AnimeSail : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = request(request.data + page).document
+        val document = cfRequest(request.data + page)
         val home = document.select("article").map {
             it.toSearchResult()
         }
@@ -98,7 +104,7 @@ class AnimeSail : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val link = "$mainUrl/?s=$query"
-        val document = request(link).document
+        val document = cfRequest(link)
 
         return document.select("div.listupd article").map {
             it.toSearchResult()
@@ -106,7 +112,7 @@ class AnimeSail : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = request(url).document
+        val document = cfRequest(url)
 
         val title = document.selectFirst("h1.entry-title")?.text().toString()
             .replace("Subtitle Indonesia", "").trim()
@@ -147,7 +153,7 @@ class AnimeSail : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
 
-        val document = request(data).document
+        val document = cfRequest(data)
 
         coroutineScope {
             document.select(".mobius > .mirror > option, select.mirror option").map { element ->
@@ -163,23 +169,10 @@ class AnimeSail : MainAPI() {
                         
                         when {
                             // Skip internal players that need special handling
-                            iframe.contains("/utils/player/arch/") || 
-                            iframe.contains("/utils/player/race/") ||
-                            iframe.contains("/utils/player/gideo/") ||
-                            iframe.contains("/utils/player/pomf/") ||
-                            iframe.contains("/utils/player/popup/") -> {
-                                // Skip these - they need cookies/special handling
+                            iframe.contains("/utils/player/") -> {
+                                // Skip all internal players
                             }
-                            // Framezilla - has nested iframe
-                            iframe.contains("/utils/player/framezilla/") -> {
-                                try {
-                                    val nested = request(iframe, data).document.select("iframe").attr("src")
-                                    if (nested.isNotEmpty()) {
-                                        loadExtractor(fixUrl(nested), mainUrl, subtitleCallback, callback)
-                                    }
-                                } catch (e: Exception) { }
-                            }
-                            // External extractors - doply, mp4upload, mixdrop, krakenfiles, etc
+                            // External extractors
                             else -> {
                                 loadExtractor(iframe, mainUrl, subtitleCallback, callback)
                             }
