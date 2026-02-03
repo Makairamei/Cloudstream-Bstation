@@ -203,6 +203,7 @@ class AnimeSail : MainAPI() {
                                         iframe.contains("/race/") -> "Race"
                                         else -> this@AnimeSail.name
                                     }
+                                    @Suppress("DEPRECATION")
                                     callback.invoke(
                                         ExtractorLink(
                                             source = source,
