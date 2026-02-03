@@ -18,6 +18,7 @@ import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.app
 import kotlin.text.Regex
 
+@OptIn(com.lagradost.cloudstream3.Prerelease::class)
 class AnimeSail : MainAPI() {
     override var mainUrl = "https://154.26.137.28"
     override var name = "AnimeSail"
