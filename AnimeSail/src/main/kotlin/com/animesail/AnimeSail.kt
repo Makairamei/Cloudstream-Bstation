@@ -5,7 +5,6 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.mvvm.safeApiCall
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.nicehttp.NiceResponse
@@ -159,44 +158,26 @@ class AnimeSail : MainAPI() {
                             Jsoup.parse(base64Decode(element.attr("data-em"))).select("iframe").attr("src")
                                 ?: throw ErrorLoadingException("No iframe found")
                         )
-                        val quality = getIndexQuality(element.text())
                         when {
                             iframe.startsWith("$mainUrl/utils/player/arch/") || iframe.startsWith(
                                 "$mainUrl/utils/player/race/"
-                            ) -> request(iframe, ref = data).document.select("source").attr("src")
-                                .let { link ->
-                                    val source =
-                                        when {
-                                            iframe.contains("/arch/") -> "Arch"
-                                            iframe.contains("/race/") -> "Race"
-                                            else -> this@AnimeSail.name
-                                        }
-                                    @Suppress("DEPRECATION")
-                                    callback.invoke(
-                                        ExtractorLink(
-                                            source = source,
-                                            name = source,
-                                            url = link,
-                                            referer = mainUrl,
-                                            quality = quality
-                                        )
-                                    )
-                                }
-
+                            ) -> {
+                                // Skip internal players - they need special handling
+                            }
                             iframe.startsWith("https://aghanim.xyz/tools/redirect/") -> {
                                 val link = "https://rasa-cintaku-semakin-berantai.xyz/v/${
                                     iframe.substringAfter("id=").substringBefore("&token")
                                 }"
-                                loadFixedExtractor(link, quality, mainUrl, subtitleCallback, callback)
+                                loadExtractor(link, mainUrl, subtitleCallback, callback)
                             }
                             iframe.startsWith("$mainUrl/utils/player/framezilla/") || iframe.startsWith("https://uservideo.xyz") -> {
                                 request(iframe, ref = data).document.select("iframe").attr("src")
                                     .let { link ->
-                                        loadFixedExtractor(fixUrl(link), quality, mainUrl, subtitleCallback, callback)
+                                        loadExtractor(fixUrl(link), mainUrl, subtitleCallback, callback)
                                     }
                             }
                             else -> {
-                                loadFixedExtractor(iframe, quality, mainUrl, subtitleCallback, callback)
+                                loadExtractor(iframe, mainUrl, subtitleCallback, callback)
                             }
                         }
                     }
@@ -206,31 +187,6 @@ class AnimeSail : MainAPI() {
 
         return true
     }
-
-    @Suppress("DEPRECATION")
-    private suspend fun loadFixedExtractor(
-        url: String,
-        quality: Int?,
-        referer: String? = null,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
-        loadExtractor(url, referer, subtitleCallback) { link ->
-            callback.invoke(
-                ExtractorLink(
-                    source = link.name,
-                    name = link.name,
-                    url = link.url,
-                    referer = link.referer,
-                    quality = if(link.type == ExtractorLinkType.M3U8) link.quality else quality ?: Qualities.Unknown.value,
-                    type = link.type,
-                    headers = link.headers,
-                    extractorData = link.extractorData
-                )
-            )
-        }
-    }
-
 
     private fun getIndexQuality(str: String): Int {
         return Regex("(\\d{3,4})[pP]").find(str)?.groupValues?.getOrNull(1)?.toIntOrNull()
