@@ -18,8 +18,8 @@ class Bstation : MainAPI() {
     private val biliintlApiUrl = "https://api.biliintl.com"
     private val subtitleProxyUrl = "https://bstation-subtitle.cf1-e6a.workers.dev"
 
-    // Cookies as raw string for Cookie header (bypass OkHttp cookie handling)
-    private val cookieString = "SESSDATA=d3e2b1e9,1785599046,be897*210091; bili_jct=c354fd55e047c9b7daddc250b5004972; DedeUserID=1709563281; buvid3=f165a4d3-71ca-42fb-aa5a-956c0eae673a44290infoc; buvid4=193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA==; bstar-web-lang=en"
+    // Complete cookies from fresh browser export (2026-02-03)
+    private val cookieString = "SESSDATA=d3e2b1e9,1785599046,be897*210091; bili_jct=c354fd55e047c9b7daddc250b5004972; DedeUserID=1709563281; DedeUserID__ckMd5=4568e91a427e5c0dd0403fdd96efae6f; mid=1709563281; buvid3=f165a4d3-71ca-42fb-aa5a-956c0eae673a44290infoc; buvid4=193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA==; joy_jct=c354fd55e047c9b7daddc250b5004972; bstar-web-lang=id; bsource=search_google"
     
     // Keep empty cookies map for compatibility
     private val cookies = mapOf<String, String>()
