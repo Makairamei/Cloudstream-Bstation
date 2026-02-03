@@ -4,7 +4,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.mvvm.safeApiCall
-import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.nicehttp.NiceResponse
@@ -43,43 +42,13 @@ class AnimeSail : MainAPI() {
         }
     }
 
-    // Use WebViewResolver to bypass Cloudflare Turnstile
-    private suspend fun requestWithWebView(url: String): NiceResponse {
+    private suspend fun request(url: String, ref: String? = null): NiceResponse {
         return app.get(
             url,
-            headers = mapOf(
-                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-            ),
+            headers = mapOf("Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
             cookies = mapOf("_as_ipin_ct" to "ID"),
-            interceptor = WebViewResolver(
-                Regex("""$mainUrl/.*"""),
-                additionalUrls = listOf(Regex("""$mainUrl/.*""")),
-                timeout = 25000
-            )
+            referer = ref
         )
-    }
-
-    private suspend fun request(url: String, ref: String? = null): NiceResponse {
-        return try {
-            val response = app.get(
-                url,
-                headers = mapOf(
-                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                    "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                ),
-                cookies = mapOf("_as_ipin_ct" to "ID"),
-                referer = ref
-            )
-            // Check if we got Cloudflare challenge page
-            if (response.text.contains("turnstile") || response.text.contains("Cek Keamanan")) {
-                requestWithWebView(url)
-            } else {
-                response
-            }
-        } catch (e: Exception) {
-            requestWithWebView(url)
-        }
     }
 
     override val mainPage = mainPageOf(
@@ -181,32 +150,36 @@ class AnimeSail : MainAPI() {
         val document = request(data).document
 
         coroutineScope {
-            document.select(".mobius > .mirror > option").map { element ->
+            document.select(".mobius > .mirror > option, select.mirror option").map { element ->
                 async {
                     safeApiCall {
+                        val dataEm = element.attr("data-em")
+                        if (dataEm.isNullOrEmpty()) return@safeApiCall
+                        
                         val iframe = fixUrl(
-                            Jsoup.parse(base64Decode(element.attr("data-em"))).select("iframe").attr("src")
-                                ?: throw ErrorLoadingException("No iframe found")
+                            Jsoup.parse(base64Decode(dataEm)).select("iframe").attr("src")
                         )
+                        if (iframe.isEmpty()) return@safeApiCall
+                        
                         when {
-                            // Skip internal players - they often don't work
-                            iframe.startsWith("$mainUrl/utils/player/arch/") || iframe.startsWith(
-                                "$mainUrl/utils/player/race/"
-                            ) -> {
-                                // Skip these internal players
+                            // Skip internal players that need special handling
+                            iframe.contains("/utils/player/arch/") || 
+                            iframe.contains("/utils/player/race/") ||
+                            iframe.contains("/utils/player/gideo/") ||
+                            iframe.contains("/utils/player/pomf/") ||
+                            iframe.contains("/utils/player/popup/") -> {
+                                // Skip these - they need cookies/special handling
                             }
-                            iframe.startsWith("https://aghanim.xyz/tools/redirect/") -> {
-                                val link = "https://rasa-cintaku-semakin-berantai.xyz/v/${
-                                    iframe.substringAfter("id=").substringBefore("&token")
-                                }"
-                                loadExtractor(link, mainUrl, subtitleCallback, callback)
-                            }
-                            iframe.startsWith("$mainUrl/utils/player/framezilla/") || iframe.startsWith("https://uservideo.xyz") -> {
-                                request(iframe, data).document.select("iframe").attr("src")
-                                    .let { link ->
-                                        loadExtractor(fixUrl(link), mainUrl, subtitleCallback, callback)
+                            // Framezilla - has nested iframe
+                            iframe.contains("/utils/player/framezilla/") -> {
+                                try {
+                                    val nested = request(iframe, data).document.select("iframe").attr("src")
+                                    if (nested.isNotEmpty()) {
+                                        loadExtractor(fixUrl(nested), mainUrl, subtitleCallback, callback)
                                     }
+                                } catch (e: Exception) { }
                             }
+                            // External extractors - doply, mp4upload, mixdrop, krakenfiles, etc
                             else -> {
                                 loadExtractor(iframe, mainUrl, subtitleCallback, callback)
                             }
