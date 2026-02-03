@@ -38,7 +38,7 @@ class AnimeSail : ParsedHttpSource() {
 
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = img
-                addQuality(epNum)
+                addQuality(epNum ?: "")
             }
         }
         return newHomePageResponse(request.name, home)
@@ -75,7 +75,7 @@ class AnimeSail : ParsedHttpSource() {
         val title = document.selectFirst("h1.entry-title")?.text()?.replace("Subtitle Indonesia", "")?.trim() ?: ""
         val poster = document.selectFirst("div.thumb img")?.attr("src")
         val description = document.selectFirst("div.entry-content p")?.text()
-        val rating = document.selectFirst(".rating strong")?.text()?.toRatingInt()
+        val rating = document.selectFirst(".rating strong")?.text()?.toRatingIntOrNull()
         val tags = document.select(".genxed a").map { it.text() }
 
         val episodes = document.select("div.eplister ul li").mapNotNull {
