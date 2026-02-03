@@ -1,5 +1,6 @@
 package com.animesail
 
+import android.util.Base64
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
@@ -10,14 +11,13 @@ class AnimeSail : ParsedHttpSource() {
     override val lang = "id"
     override val supportsLatest = true
     
-    // Cookies required for bypass
+    // Hardcoded cookies to bypass Cloudflare Turnstile (User Provided)
     private val cookies = mapOf(
         "_as_turnstile" to "7ca75f267f4baab5b0a7634d930503312176f854567a9d870f3c371af04eefe4",
         "_as_ipin_ct" to "ID",
         "_as_ipin_tz" to "Asia/Jakarta",
         "_as_ipin_lc" to "en-US"
     )
-
 
     override val mainPage = mainPageOf(
         "$baseUrl/rilisan-anime-terbaru/page/" to "Episode Terbaru",
@@ -52,8 +52,7 @@ class AnimeSail : ParsedHttpSource() {
             val title = it.selectFirst("div.tt h2")?.text()?.replace("Subtitle Indonesia", "")?.trim() ?: return@mapNotNull null
             val href = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
             val img = it.selectFirst("img")?.attr("src")
-            // Search results might not have ep num in same place, keeping basics
-            
+
             newAnimeSearchResponse(title, href, TvType.Anime) {
                 this.posterUrl = img
             }
@@ -63,21 +62,13 @@ class AnimeSail : ParsedHttpSource() {
     override fun load(url: String): LoadResponse {
         val document = app.get(url, cookies = cookies).document
         
-        // Handle Episode Page -> Redirect logic or Parse as Anime
-        // The site structure links to episode pages from "Latest".
-        // But we want the Anime Details.
-        // Usually there's a "All Episodes" or "Anime Info" link on the episode page.
-        // Look for breadcrumbs or "Info" button.
-        
+        // Handle "Episode" page -> Redirect to parent Anime page if possible
+        // But for consistency, if user clicked an episode, we usually want to load the Anime details
         val isEpisode = url.contains("-episode-")
-        
         if (isEpisode) {
-            // Try to find the anime link from breadcrumbs or info box
-            // Common WordPress themes pattern: .gmr-breadcrumb a, or .names a
-            // Based on view-source: <div class="names"><a href="...">
             val animeLink = document.selectFirst(".names a")?.attr("href")
             if (animeLink != null && !animeLink.contains("episode")) {
-                 return load(animeLink) // Recursive load of the anime page
+                 return load(animeLink) 
             }
         }
 
@@ -85,20 +76,14 @@ class AnimeSail : ParsedHttpSource() {
         val poster = document.selectFirst("div.thumb img")?.attr("src")
         val description = document.selectFirst("div.entry-content p")?.text()
         val rating = document.selectFirst(".rating strong")?.text()?.toRatingInt()
-        
-        // Genre parsing
         val tags = document.select(".genxed a").map { it.text() }
 
-        // Episode List
-        // Structure: div.eplister ul li
-        // OR: div.bixbox#series-list (sometimes)
         val episodes = document.select("div.eplister ul li").mapNotNull {
             val link = it.selectFirst("a") ?: return@mapNotNull null
             val epTitle = link.selectFirst("div.epl-title")?.text() ?: link.text()
             val epUrl = link.attr("href")
             val epNumStr = link.selectFirst("div.epl-num")?.text()
             
-            // Extract number from string if needed
             val epNum = epNumStr?.filter { it.isDigit() }?.toIntOrNull() 
                         ?: epTitle.filter { it.isDigit() }.toIntOrNull()
 
@@ -108,12 +93,10 @@ class AnimeSail : ParsedHttpSource() {
             }
         }.reversed()
         
-        // Recommendations
         val recommendations = document.select(".relatedpost article").mapNotNull {
             val recTitle = it.selectFirst("h2")?.text()?.replace("Subtitle Indonesia", "")?.trim() ?: return@mapNotNull null
             val recHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
             val recImg = it.selectFirst("img")?.attr("src")
-            
             newAnimeSearchResponse(recTitle, recHref, TvType.Anime) {
                this.posterUrl = recImg
             }
@@ -136,68 +119,77 @@ class AnimeSail : ParsedHttpSource() {
     ): Boolean {
         val document = app.get(url, cookies = cookies).document
         
-        // 1. STANDARD IFRAMES (Most common)
+        // 1. Scan Standard Iframes
         document.select("iframe").forEach { iframe ->
-            var src = iframe.attr("src")
-            if (src.startsWith("//")) src = "https:$src"
-            
-            // Log iframe to debug (user can see in logs if needed)
-            // System.out.println("Found iframe: $src")
-            
-            loadExtractor(src, callback, subtitleCallback)
+            fixAndLoad(iframe.attr("src"), callback, subtitleCallback)
         }
         
-        // 2. MIRROR DROPDOWNS (Common in WordPress themes)
+        // 2. Scan Mirrors (Option dropdowns / Li items)
+        // Only extract from value/data-src, assume it might be base64
         document.select("ul#mir-list li, .mirror option, .mirror-item").forEach {
-             var src = it.attr("data-src").ifEmpty { it.attr("value") }
-             
-             // Decode Base64 if it looks like one (no http/https)
-             if (src.isNotEmpty() && !src.startsWith("http")) {
-                 try {
-                     src = base64Decode(src)
-                 } catch (e: Exception) { }
-             }
-             
-             if (src.startsWith("//")) src = "https:$src"
-             if (src.startsWith("http")) {
-                 loadExtractor(src, callback, subtitleCallback)
+             val src = it.attr("data-src").ifEmpty { it.attr("value") }
+             if (src.isNotEmpty()) {
+                 tryDecodeAndLoad(src, callback, subtitleCallback)
              }
         }
         
-        // 3. JAVASCRIPT/BASE64 SCANNERS (For hidden players like Blogger/Picasa)
-        val html = document.html()
-        
-        // Regex to find Base64 in data-content, data-default, OR data-em
-        // Also captures the option text if possible (challenging with regex alone on full html)
-        // Better approach: Iterate the DOM elements since we have jsoup document
-        
+        // 3. Scan Base64 in data attributes (data-content, data-default, data-em)
         document.select("[data-content], [data-default], [data-em]").forEach { element ->
              val base64Data = element.attr("data-content").ifEmpty { 
                  element.attr("data-default").ifEmpty { element.attr("data-em") } 
              }
-             val label = element.text() // E.g., "udon 1080p"
-             
              if (base64Data.isNotEmpty()) {
-                 try {
-                     val decoded = base64Decode(base64Data)
-                     val iframeSrc = Regex("src=\"([^\"]+)\"").find(decoded)?.groupValues?.get(1)
-                     
-                     if (iframeSrc != null) {
-                        var finalSrc = iframeSrc
-                        if (finalSrc.startsWith("//")) finalSrc = "https:$finalSrc"
-                        if (finalSrc.startsWith("/")) finalSrc = "$baseUrl$finalSrc"
-                        
-                        // Pass the label (host + quality) to the extractor callback if possible
-                        // Cloudstream loadExtractor doesn't accept name directly, but we can wrap it or try to infer
-                        // For now, let's just load it. The generic extractor usually identifies the host.
-                        // Ideally we would create a specific ExtractorLink but generic is safer for unknown hosts.
-                        
-                        loadExtractor(finalSrc, callback, subtitleCallback)
-                     }
-                 } catch (_: Exception) {}
+                 tryDecodeAndLoad(base64Data, callback, subtitleCallback)
              }
         }
 
         return true
+    }
+
+    private fun tryDecodeAndLoad(
+        raw: String, 
+        callback: (ExtractorLink) -> Unit, 
+        subtitleCallback: (SubtitleFile) -> Unit
+    ) {
+        try {
+            // Try as plain URL first
+            if (raw.startsWith("http")) {
+                loadExtractor(raw, callback, subtitleCallback)
+                return
+            }
+            
+            // Try decode
+            val decoded = decodeBase64(raw)
+            
+            // If decoded is an iframe tag
+            val iframeSrc = Regex("src=\"([^\"]+)\"").find(decoded)?.groupValues?.get(1)
+            if (iframeSrc != null) {
+                fixAndLoad(iframeSrc, callback, subtitleCallback)
+                return
+            }
+            
+            // If decoded is just a URL
+            if (decoded.startsWith("http") || decoded.startsWith("//")) {
+                fixAndLoad(decoded, callback, subtitleCallback)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun fixAndLoad(
+        url: String, 
+        callback: (ExtractorLink) -> Unit, 
+        subtitleCallback: (SubtitleFile) -> Unit
+    ) {
+        var finalSrc = url.trim()
+        if (finalSrc.startsWith("//")) finalSrc = "https:$finalSrc"
+        if (finalSrc.startsWith("/")) finalSrc = "$baseUrl$finalSrc"
+        
+        if (finalSrc.startsWith("http")) {
+            loadExtractor(finalSrc, "$baseUrl/", subtitleCallback, callback)
+        }
+    }
+
+    private fun decodeBase64(input: String): String {
+        return String(Base64.decode(input, Base64.DEFAULT))
     }
 }
