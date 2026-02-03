@@ -19,11 +19,11 @@ class Bstation : MainAPI() {
     private val subtitleProxyUrl = "https://bstation-subtitle.cf1-e6a.workers.dev"
 
     private val cookies = mapOf(
-        "SESSDATA" to "a97adc61%2C1785509852%2Cdd028%2A210091",
-        "bili_jct" to "bca5203c3f1cda514530500a8ca0fc10",
+        "SESSDATA" to "d3e2b1e9%2C1785599046%2Cbe897%2A210091",
+        "bili_jct" to "c354fd55e047c9b7daddc250b5004972",
         "DedeUserID" to "1709563281",
-        "buvid3" to "ddbadfe4-0540-43ce-b22d-5644f59fded314589infoc",
-        "buvid4" to "59AD9169-1B99-2A66-E0D3-9A6E759A1FB782033-026011921-q8GoWR2UlMAMBjSSRABQgw%3D%3D",
+        "buvid3" to "f165a4d3-71ca-42fb-aa5a-956c0eae673a44290infoc",
+        "buvid4" to "193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA%3D%3D",
         "bstar-web-lang" to "en"
     )
 
@@ -178,7 +178,7 @@ class Bstation : MainAPI() {
             this.plot = description
         }
     }
-    
+    @OptIn(com.lagradost.cloudstream3.Prerelease::class)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -209,10 +209,6 @@ class Bstation : MainAPI() {
                 // 1. Prioritize Muxed (durl) streams (Audio+Video guaranteed)
                 primaryRes.data?.durl?.forEach { durl ->
                     val videoUrl = durl.url ?: return@forEach
-                    // durl doesn't provide quality label, assuming "Direct" or inferred elsewhere.
-                    // To avoid duplicates, we'll need to be careful. But durl is usually unique.
-                    // Let's verify resolution from url if possible or just label "Direct".
-                    // Actually, duplication usually comes from streamList matching durl.
                     
                     callback.invoke(
                         newExtractorLink(this.name, "$name Direct", videoUrl, INFER_TYPE) {
@@ -224,8 +220,8 @@ class Bstation : MainAPI() {
                     foundLinks = true
                 }
                 
-                // 2. Process streamList (DASH) - Simple Video Links (stable)
-                 videoInfo.streamList?.forEach { stream ->
+                // 2. Process streamList (DASH) - Add Audio for Pre-release
+                videoInfo.streamList?.forEach { stream ->
                     val videoUrl = stream.dashVideo?.baseUrl ?: stream.baseUrl ?: return@forEach
                     val quality = stream.streamInfo?.displayDesc ?: "Unknown"
 
@@ -233,7 +229,26 @@ class Bstation : MainAPI() {
                     if (addedQualities.contains(quality)) return@forEach
                     addedQualities.add(quality)
 
-                    // Simple Video Link (no audio merging for stability)
+                    // Try to merge audio (Pre-release feature)
+                    try {
+                        if (!audioUrl.isNullOrEmpty()) {
+                            val audioFiles = listOf(newAudioFile(audioUrl) {})
+                            callback.invoke(
+                                newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
+                                    this.referer = "https://www.bilibili.tv/"
+                                    this.quality = getQualityFromName(quality)
+                                    this.headers = this@Bstation.headers
+                                    this.audioTracks = audioFiles
+                                }
+                            )
+                            foundLinks = true
+                            return@forEach
+                        }
+                    } catch (_: Throwable) {
+                        // Pre-release feature not available, fallback to video-only
+                    }
+
+                    // Fallback: Video without audio merging
                     callback.invoke(
                         newExtractorLink(this.name, "$name $quality", videoUrl, INFER_TYPE) {
                             this.referer = "https://www.bilibili.tv/"
