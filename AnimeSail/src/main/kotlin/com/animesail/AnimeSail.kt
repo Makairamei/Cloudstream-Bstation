@@ -136,30 +136,45 @@ class AnimeSail : ParsedHttpSource() {
     ): Boolean {
         val document = app.get(url, cookies = cookies).document
         
-        // 1. Check for standard iframe embeds
+        // 1. STANDARD IFRAMES (Most common)
         document.select("iframe").forEach { iframe ->
-            val src = iframe.attr("src")
-            // Handle common players
+            var src = iframe.attr("src")
+            if (src.startsWith("//")) src = "https:$src"
+            
+            // Log iframe to debug (user can see in logs if needed)
+            // System.out.println("Found iframe: $src")
+            
             loadExtractor(src, callback, subtitleCallback)
         }
         
-        // 2. Check for "Mirror" selection dropdown/buttons if any
-        // Usually id="mirror" or select[name="mirror"] 
-        document.select(".mirror option, .mirror-item").forEach {
-             val src = it.attr("value").ifEmpty { it.attr("data-src") }
-             if (src.isNotEmpty()) {
-                 var decodedSrc = src
-                 // Decode base64 if needed (common in WP themes)
-                 if (!src.startsWith("http")) {
-                     try {
-                         decodedSrc = base64Decode(src)
-                     } catch (e: Exception) {}
-                 }
-                 
-                 if (decodedSrc.startsWith("http")) {
-                    loadExtractor(decodedSrc, callback, subtitleCallback)
-                 }
+        // 2. MIRROR DROPDOWNS (Common in WordPress themes)
+        document.select("ul#mir-list li, .mirror option, .mirror-item").forEach {
+             var src = it.attr("data-src").ifEmpty { it.attr("value") }
+             
+             // Decode Base64 if it looks like one (no http/https)
+             if (src.isNotEmpty() && !src.startsWith("http")) {
+                 try {
+                     src = base64Decode(src)
+                 } catch (e: Exception) { }
              }
+             
+             if (src.startsWith("//")) src = "https:$src"
+             if (src.startsWith("http")) {
+                 loadExtractor(src, callback, subtitleCallback)
+             }
+        }
+        
+        // 3. JAVASCRIPT/BASE64 SCANNERS (For hidden players like Blogger/Picasa)
+        val html = document.html()
+        val base64Regex = Regex("(?<=data-content=\")[^\"]+")
+        base64Regex.findAll(html).forEach { match ->
+            try {
+                val decoded = base64Decode(match.value)
+                val iframeSrc = Regex("src=\"([^\"]+)\"").find(decoded)?.groupValues?.get(1)
+                if (iframeSrc != null) {
+                    loadExtractor(iframeSrc, callback, subtitleCallback)
+                }
+            } catch (_: Exception) {}
         }
 
         return true
