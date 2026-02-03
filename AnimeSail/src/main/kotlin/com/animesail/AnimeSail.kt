@@ -166,13 +166,23 @@ class AnimeSail : ParsedHttpSource() {
         
         // 3. JAVASCRIPT/BASE64 SCANNERS (For hidden players like Blogger/Picasa)
         val html = document.html()
-        val base64Regex = Regex("(?<=data-content=\")[^\"]+")
+        
+        // Regex to find Base64 in data-content or data-default attributes
+        val base64Regex = Regex("(?<=data-(content|default)=\")[^\"]+")
+        
         base64Regex.findAll(html).forEach { match ->
             try {
                 val decoded = base64Decode(match.value)
                 val iframeSrc = Regex("src=\"([^\"]+)\"").find(decoded)?.groupValues?.get(1)
+                
                 if (iframeSrc != null) {
-                    loadExtractor(iframeSrc, callback, subtitleCallback)
+                    var finalSrc = iframeSrc
+                    if (finalSrc.startsWith("//")) finalSrc = "https:$finalSrc"
+                    
+                    // If it's a relative path locally (like /utils/player/...), prepend baseUrl
+                    if (finalSrc.startsWith("/")) finalSrc = "$baseUrl$finalSrc"
+                    
+                    loadExtractor(finalSrc, callback, subtitleCallback)
                 }
             } catch (_: Exception) {}
         }
