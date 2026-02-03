@@ -18,19 +18,17 @@ class Bstation : MainAPI() {
     private val biliintlApiUrl = "https://api.biliintl.com"
     private val subtitleProxyUrl = "https://bstation-subtitle.cf1-e6a.workers.dev"
 
-    private val cookies = mapOf(
-        "SESSDATA" to "d3e2b1e9,1785599046,be897*210091",
-        "bili_jct" to "c354fd55e047c9b7daddc250b5004972",
-        "DedeUserID" to "1709563281",
-        "buvid3" to "f165a4d3-71ca-42fb-aa5a-956c0eae673a44290infoc",
-        "buvid4" to "193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA==",
-        "bstar-web-lang" to "en"
-    )
+    // Cookies as raw string for Cookie header (bypass OkHttp cookie handling)
+    private val cookieString = "SESSDATA=d3e2b1e9,1785599046,be897*210091; bili_jct=c354fd55e047c9b7daddc250b5004972; DedeUserID=1709563281; buvid3=f165a4d3-71ca-42fb-aa5a-956c0eae673a44290infoc; buvid4=193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA==; bstar-web-lang=en"
+    
+    // Keep empty cookies map for compatibility
+    private val cookies = mapOf<String, String>()
 
     private val headers = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
         "Referer" to "https://www.bilibili.tv/",
-        "Origin" to "https://www.bilibili.tv"
+        "Origin" to "https://www.bilibili.tv",
+        "Cookie" to cookieString
     )
 
     override val mainPage = mainPageOf(
