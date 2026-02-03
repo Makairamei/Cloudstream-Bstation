@@ -60,8 +60,8 @@ def generate_repo():
 
     # Write repo.json
     repo = {
-        "name": "Makairamei Extensions",
-        "description": "AnimeSail & Bstation Extensions for Cloudstream",
+        "name": "Cloudstream-Bstation",
+        "description": "Bstation Extension Repository",
         "manifestVersion": 1,
         "pluginLists": [
             f"{base_url}/plugins.json"
