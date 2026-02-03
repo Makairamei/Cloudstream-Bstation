@@ -8,7 +8,6 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.nicehttp.NiceResponse
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -172,18 +171,18 @@ class AnimeSail : MainAPI() {
                                             iframe.contains("/race/") -> "Race"
                                             else -> this@AnimeSail.name
                                         }
+                                    @Suppress("DEPRECATION")
                                     callback.invoke(
-                                        newExtractorLink(
+                                        ExtractorLink(
                                             source = source,
                                             name = source,
                                             url = link,
-                                            type = ExtractorLinkType.VIDEO
-                                        ) {
-                                            this.referer = mainUrl
-                                            this.quality = quality
-                                        }
+                                            referer = mainUrl,
+                                            quality = quality
+                                        )
                                     )
                                 }
+
                             iframe.startsWith("https://aghanim.xyz/tools/redirect/") -> {
                                 val link = "https://rasa-cintaku-semakin-berantai.xyz/v/${
                                     iframe.substringAfter("id=").substringBefore("&token")
@@ -208,6 +207,7 @@ class AnimeSail : MainAPI() {
         return true
     }
 
+    @Suppress("DEPRECATION")
     private suspend fun loadFixedExtractor(
         url: String,
         quality: Int?,
@@ -217,20 +217,20 @@ class AnimeSail : MainAPI() {
     ) {
         loadExtractor(url, referer, subtitleCallback) { link ->
             callback.invoke(
-                newExtractorLink(
+                ExtractorLink(
                     source = link.name,
                     name = link.name,
                     url = link.url,
-                    type = link.type
-                ) {
-                    this.referer = link.referer
-                    this.quality = if(link.type == ExtractorLinkType.M3U8) link.quality else quality ?: Qualities.Unknown.value
-                    this.headers = link.headers
-                    this.extractorData = link.extractorData
-                }
+                    referer = link.referer,
+                    quality = if(link.type == ExtractorLinkType.M3U8) link.quality else quality ?: Qualities.Unknown.value,
+                    type = link.type,
+                    headers = link.headers,
+                    extractorData = link.extractorData
+                )
             )
         }
     }
+
 
     private fun getIndexQuality(str: String): Int {
         return Regex("(\\d{3,4})[pP]").find(str)?.groupValues?.getOrNull(1)?.toIntOrNull()
