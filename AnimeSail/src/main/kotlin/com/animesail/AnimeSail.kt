@@ -6,13 +6,11 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.mvvm.safeApiCall
 import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.nicehttp.NiceResponse
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import okhttp3.Interceptor
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
@@ -190,30 +188,12 @@ class AnimeSail : MainAPI() {
                             Jsoup.parse(base64Decode(element.attr("data-em"))).select("iframe").attr("src")
                                 ?: throw ErrorLoadingException("No iframe found")
                         )
-                        val quality = getIndexQuality(element.text())
                         when {
+                            // Skip internal players - they often don't work
                             iframe.startsWith("$mainUrl/utils/player/arch/") || iframe.startsWith(
                                 "$mainUrl/utils/player/race/"
                             ) -> {
-                                val playerDoc = request(iframe, data).document
-                                val videoUrl = playerDoc.select("source").attr("src")
-                                if (videoUrl.isNotEmpty()) {
-                                    val source = when {
-                                        iframe.contains("/arch/") -> "Arch"
-                                        iframe.contains("/race/") -> "Race"
-                                        else -> this@AnimeSail.name
-                                    }
-                                    @Suppress("DEPRECATION")
-                                    callback.invoke(
-                                        ExtractorLink(
-                                            source = source,
-                                            name = "$source - ${quality}p",
-                                            url = videoUrl,
-                                            referer = mainUrl,
-                                            quality = quality
-                                        )
-                                    )
-                                }
+                                // Skip these internal players
                             }
                             iframe.startsWith("https://aghanim.xyz/tools/redirect/") -> {
                                 val link = "https://rasa-cintaku-semakin-berantai.xyz/v/${
@@ -237,11 +217,6 @@ class AnimeSail : MainAPI() {
         }
 
         return true
-    }
-
-    private fun getIndexQuality(str: String): Int {
-        return Regex("(\\d{3,4})[pP]").find(str)?.groupValues?.getOrNull(1)?.toIntOrNull()
-            ?: Qualities.Unknown.value
     }
 
 }
