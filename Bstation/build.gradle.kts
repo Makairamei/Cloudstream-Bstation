@@ -1,4 +1,4 @@
-version = 36
+version = 37
 
 cloudstream {
     description = "Bstation — Bilibili TV Indonesia"
