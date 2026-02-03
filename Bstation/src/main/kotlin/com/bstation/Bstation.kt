@@ -17,8 +17,38 @@ class Bstation : MainAPI() {
     private val apiUrl = "https://api.bilibili.tv"
     private val biliintlApiUrl = "https://api.biliintl.com"
     private val subtitleProxyUrl = "https://bstation-subtitle.cf1-e6a.workers.dev"
-
-    // Complete cookies from fresh browser export (2026-02-03)
+    /*
+     * =========================================================================
+     *                      VIP COOKIES - CARA UPDATE
+     * =========================================================================
+     * 
+     * Kalau VIP sudah expired, ikuti langkah ini:
+     * 
+     * 1. Login ke https://www.bilibili.tv/ dengan akun VIP
+     * 2. Install browser extension "Cookie Editor" atau "EditThisCookie"
+     * 3. Export cookies sebagai Netscape format (.txt)
+     * 4. Buka file, cari nilai-nilai ini:
+     *    - SESSDATA (decode %2C jadi , dan %2A jadi *)
+     *    - bili_jct
+     *    - DedeUserID
+     *    - DedeUserID__ckMd5
+     *    - mid
+     *    - buvid3
+     *    - buvid4 (decode %3D jadi =)
+     *    - joy_jct
+     * 5. Update cookieString di bawah dengan format:
+     *    "SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx; ..."
+     * 6. Push ke GitHub, tunggu build selesai
+     * 7. Update extension di Cloudstream
+     * 
+     * PENTING: SESSDATA biasanya URL-encoded. Decode dulu:
+     *   %2C -> ,
+     *   %2A -> *
+     *   %3D -> =
+     * =========================================================================
+     */
+    
+    // UPDATE COOKIES DI BAWAH INI (format: key=value; key=value; ...)
     private val cookieString = "SESSDATA=d3e2b1e9,1785599046,be897*210091; bili_jct=c354fd55e047c9b7daddc250b5004972; DedeUserID=1709563281; DedeUserID__ckMd5=4568e91a427e5c0dd0403fdd96efae6f; mid=1709563281; buvid3=f165a4d3-71ca-42fb-aa5a-956c0eae673a44290infoc; buvid4=193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA==; joy_jct=c354fd55e047c9b7daddc250b5004972; bstar-web-lang=id; bsource=search_google"
     
     // Keep empty cookies map for compatibility
