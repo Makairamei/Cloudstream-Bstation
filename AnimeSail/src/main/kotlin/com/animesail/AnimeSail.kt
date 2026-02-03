@@ -167,24 +167,35 @@ class AnimeSail : ParsedHttpSource() {
         // 3. JAVASCRIPT/BASE64 SCANNERS (For hidden players like Blogger/Picasa)
         val html = document.html()
         
-        // Regex to find Base64 in data-content or data-default attributes
-        val base64Regex = Regex("(?<=data-(content|default)=\")[^\"]+")
+        // Regex to find Base64 in data-content, data-default, OR data-em
+        // Also captures the option text if possible (challenging with regex alone on full html)
+        // Better approach: Iterate the DOM elements since we have jsoup document
         
-        base64Regex.findAll(html).forEach { match ->
-            try {
-                val decoded = base64Decode(match.value)
-                val iframeSrc = Regex("src=\"([^\"]+)\"").find(decoded)?.groupValues?.get(1)
-                
-                if (iframeSrc != null) {
-                    var finalSrc = iframeSrc
-                    if (finalSrc.startsWith("//")) finalSrc = "https:$finalSrc"
-                    
-                    // If it's a relative path locally (like /utils/player/...), prepend baseUrl
-                    if (finalSrc.startsWith("/")) finalSrc = "$baseUrl$finalSrc"
-                    
-                    loadExtractor(finalSrc, callback, subtitleCallback)
-                }
-            } catch (_: Exception) {}
+        document.select("[data-content], [data-default], [data-em]").forEach { element ->
+             val base64Data = element.attr("data-content").ifEmpty { 
+                 element.attr("data-default").ifEmpty { element.attr("data-em") } 
+             }
+             val label = element.text() // E.g., "udon 1080p"
+             
+             if (base64Data.isNotEmpty()) {
+                 try {
+                     val decoded = base64Decode(base64Data)
+                     val iframeSrc = Regex("src=\"([^\"]+)\"").find(decoded)?.groupValues?.get(1)
+                     
+                     if (iframeSrc != null) {
+                        var finalSrc = iframeSrc
+                        if (finalSrc.startsWith("//")) finalSrc = "https:$finalSrc"
+                        if (finalSrc.startsWith("/")) finalSrc = "$baseUrl$finalSrc"
+                        
+                        // Pass the label (host + quality) to the extractor callback if possible
+                        // Cloudstream loadExtractor doesn't accept name directly, but we can wrap it or try to infer
+                        // For now, let's just load it. The generic extractor usually identifies the host.
+                        // Ideally we would create a specific ExtractorLink but generic is safer for unknown hosts.
+                        
+                        loadExtractor(finalSrc, callback, subtitleCallback)
+                     }
+                 } catch (_: Exception) {}
+             }
         }
 
         return true

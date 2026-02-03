@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import base64
 import re
 
-url = "https://154.26.137.28/bai-lian-cheng-shen-3-episode-10/"
+url = "https://154.26.137.28/jigokuraku-2nd-season-episode-4/"
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -55,7 +55,8 @@ try:
     print("\n--- 3. BASE64 CONTENT ---")
     # Check for encoded content often used in older themes
     content = response.text
-    base64_regex = r"(?<=data-content=\")[^\"]+"
+    # Updated regex to match data-content OR data-default
+    base64_regex = r"(?<=data-(?:content|default)=\")[^\"]+"
     matches = re.finditer(base64_regex, content)
     for match in matches:
         val = match.group(0)
