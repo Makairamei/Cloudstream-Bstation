@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.mvvm.safeApiCall
+import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
@@ -11,6 +12,7 @@ import com.lagradost.nicehttp.NiceResponse
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import okhttp3.Interceptor
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
@@ -43,13 +45,43 @@ class AnimeSail : MainAPI() {
         }
     }
 
-    private suspend fun request(url: String, ref: String? = null): NiceResponse {
+    // Use WebViewResolver to bypass Cloudflare Turnstile
+    private suspend fun requestWithWebView(url: String): NiceResponse {
         return app.get(
             url,
-            headers = mapOf("Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
+            headers = mapOf(
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+            ),
             cookies = mapOf("_as_ipin_ct" to "ID"),
-            referer = ref
+            interceptor = WebViewResolver(
+                Regex("""$mainUrl/.*"""),
+                additionalUrls = listOf(Regex("""$mainUrl/.*""")),
+                timeout = 25000
+            )
         )
+    }
+
+    private suspend fun request(url: String, ref: String? = null): NiceResponse {
+        return try {
+            val response = app.get(
+                url,
+                headers = mapOf(
+                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                    "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                ),
+                cookies = mapOf("_as_ipin_ct" to "ID"),
+                referer = ref
+            )
+            // Check if we got Cloudflare challenge page
+            if (response.text.contains("turnstile") || response.text.contains("Cek Keamanan")) {
+                requestWithWebView(url)
+            } else {
+                response
+            }
+        } catch (e: Exception) {
+            requestWithWebView(url)
+        }
     }
 
     override val mainPage = mainPageOf(
@@ -158,11 +190,29 @@ class AnimeSail : MainAPI() {
                             Jsoup.parse(base64Decode(element.attr("data-em"))).select("iframe").attr("src")
                                 ?: throw ErrorLoadingException("No iframe found")
                         )
+                        val quality = getIndexQuality(element.text())
                         when {
                             iframe.startsWith("$mainUrl/utils/player/arch/") || iframe.startsWith(
                                 "$mainUrl/utils/player/race/"
                             ) -> {
-                                // Skip internal players - they need special handling
+                                val playerDoc = request(iframe, data).document
+                                val videoUrl = playerDoc.select("source").attr("src")
+                                if (videoUrl.isNotEmpty()) {
+                                    val source = when {
+                                        iframe.contains("/arch/") -> "Arch"
+                                        iframe.contains("/race/") -> "Race"
+                                        else -> this@AnimeSail.name
+                                    }
+                                    callback.invoke(
+                                        ExtractorLink(
+                                            source = source,
+                                            name = "$source - ${quality}p",
+                                            url = videoUrl,
+                                            referer = mainUrl,
+                                            quality = quality
+                                        )
+                                    )
+                                }
                             }
                             iframe.startsWith("https://aghanim.xyz/tools/redirect/") -> {
                                 val link = "https://rasa-cintaku-semakin-berantai.xyz/v/${
@@ -171,7 +221,7 @@ class AnimeSail : MainAPI() {
                                 loadExtractor(link, mainUrl, subtitleCallback, callback)
                             }
                             iframe.startsWith("$mainUrl/utils/player/framezilla/") || iframe.startsWith("https://uservideo.xyz") -> {
-                                request(iframe, ref = data).document.select("iframe").attr("src")
+                                request(iframe, data).document.select("iframe").attr("src")
                                     .let { link ->
                                         loadExtractor(fixUrl(link), mainUrl, subtitleCallback, callback)
                                     }
