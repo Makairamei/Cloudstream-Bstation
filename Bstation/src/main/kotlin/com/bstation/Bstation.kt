@@ -19,11 +19,11 @@ class Bstation : MainAPI() {
     private val subtitleProxyUrl = "https://bstation-subtitle.cf1-e6a.workers.dev"
 
     private val cookies = mapOf(
-        "SESSDATA" to "d3e2b1e9%2C1785599046%2Cbe897%2A210091",
+        "SESSDATA" to "d3e2b1e9,1785599046,be897*210091",
         "bili_jct" to "c354fd55e047c9b7daddc250b5004972",
         "DedeUserID" to "1709563281",
         "buvid3" to "f165a4d3-71ca-42fb-aa5a-956c0eae673a44290infoc",
-        "buvid4" to "193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA%3D%3D",
+        "buvid4" to "193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA==",
         "bstar-web-lang" to "en"
     )
 

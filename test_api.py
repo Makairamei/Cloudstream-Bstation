@@ -1,62 +1,86 @@
 import requests
-import json
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Referer': 'https://www.bilibili.tv/',
+    'Origin': 'https://www.bilibili.tv'
 }
 
 cookies = {
-    'SESSDATA': 'a97adc61%2C1785509852%2Cdd028%2A210091',
-    'bili_jct': 'bca5203c3f1cda514530500a8ca0fc10',
+    'SESSDATA': 'd3e2b1e9,1785599046,be897*210091',
+    'bili_jct': 'c354fd55e047c9b7daddc250b5004972',
     'DedeUserID': '1709563281',
+    'buvid3': 'f165a4d3-71ca-42fb-aa5a-956c0eae673a44290infoc',
+    'buvid4': '193EE759-E26D-6A17-9E3A-F6515909D4AF56972-026020223-VQcoVjaTucTuIONkEeQ0RA==',
     'bstar-web-lang': 'en'
 }
 
-# Get playurl for anime 2289171 episode 1
-api_url = 'https://api.bilibili.tv/intl/gateway/v2/ogv/playurl?ep_id=24657572&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID'
-r = requests.get(api_url, headers=headers, cookies=cookies)
+# Test episodes
+# 1. Free episode - Kaisar Abadi ep 1
+# 2. VIP episode - should work with VIP cookies
+# 3. VIP episode that user tested (Kaisar Abadi ep 16)
+
+episodes = [
+    ('13765998', 'Kaisar Abadi Ep 1 (FREE)'),
+    ('13768739', 'Kaisar Abadi Ep 16 (VIP)'),
+    ('24739195', 'Jujutsu Kaisen Ep 48 (VIP)'),
+]
+
+print("="*60)
+print("COMPARING FREE vs VIP VIDEO URL ACCESS")
+print("="*60)
+
+for ep_id, name in episodes:
+    print(f"\n--- {name} ---")
+    
+    url = f'https://api.bilibili.tv/intl/gateway/v2/ogv/playurl?ep_id={ep_id}&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID'
+    r = requests.get(url, headers=headers, cookies=cookies)
+    d = r.json()
+    
+    data = d.get('data', {})
+    video_info = data.get('video_info', {})
+    streams = video_info.get('stream_list', [])
+    
+    if streams:
+        video_url = streams[0].get('dash_video', {}).get('base_url', '')
+        if video_url:
+            print(f"  Video URL found")
+            print(f"  URL starts with: {video_url[:50]}...")
+            
+            # Test different referers
+            referers = [
+                'https://www.bilibili.tv/',
+                'https://www.bilibili.com/',
+                None,  # No referer
+            ]
+            
+            for ref in referers:
+                hdrs = {'User-Agent': headers['User-Agent']}
+                if ref:
+                    hdrs['Referer'] = ref
+                r2 = requests.head(video_url, headers=hdrs, timeout=5)
+                print(f"  Referer '{ref}': {r2.status_code}")
+        else:
+            print("  Video URL is EMPTY!")
+    else:
+        print("  No streams returned!")
+
+print("\n" + "="*60)
+print("CHECKING IF VIP VIDEO URL HAS EXPIRATION OR TOKEN")
+print("="*60)
+
+# Get fresh video URL and check its format
+ep_id = '13768739'  # Kaisar Abadi ep 16
+url = f'https://api.bilibili.tv/intl/gateway/v2/ogv/playurl?ep_id={ep_id}&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID'
+r = requests.get(url, headers=headers, cookies=cookies)
 d = r.json()
 
-print("Full response structure:")
-data = d.get('data', {})
+video_url = d['data']['video_info']['stream_list'][0]['dash_video']['base_url']
+print(f"\nFull Video URL:\n{video_url}")
 
-# Check for DURL (muxed video+audio)
-durl = data.get('durl', [])
-print(f"DURL (muxed): {len(durl)} streams")
-
-# Check video_info
-video_info = data.get('video_info', {})
-print(f"\nvideo_info keys: {list(video_info.keys())}")
-
-# Check stream_list (DASH video only)
-stream_list = video_info.get('stream_list', [])
-print(f"stream_list: {len(stream_list)} streams")
-
-if stream_list:
-    print("\nFirst stream details:")
-    first = stream_list[0]
-    print(f"  stream_info: {first.get('stream_info', {}).get('display_desc')}")
-    dash_video = first.get('dash_video', {})
-    print(f"  dash_video.base_url exists: {bool(dash_video.get('base_url'))}")
-
-# Check dash_audio (separate audio for DASH)
-dash_audio = video_info.get('dash_audio', [])
-print(f"\ndash_audio: {len(dash_audio)} tracks")
-if dash_audio:
-    print(f"  First audio URL exists: {bool(dash_audio[0].get('base_url'))}")
-    print(f"  Audio URL: {dash_audio[0].get('base_url', '')[:80]}...")
-else:
-    print("  NO AUDIO TRACKS! This may be pre-release or needs fallback API")
-
-# Compare with working anime (Kaisar Abadi ep 1)
-print("\n" + "="*60)
-print("Comparing with working anime (Kaisar Abadi ep 1):")
-api_url2 = 'https://api.bilibili.tv/intl/gateway/v2/ogv/playurl?ep_id=13765998&platform=web&qn=64&type=mp4&tf=0&s_locale=id_ID'
-r2 = requests.get(api_url2, headers=headers, cookies=cookies)
-d2 = r2.json()
-data2 = d2.get('data', {})
-video_info2 = data2.get('video_info', {})
-dash_audio2 = video_info2.get('dash_audio', [])
-durl2 = data2.get('durl', [])
-print(f"DURL: {len(durl2)}, DASH Audio: {len(dash_audio2)}")
+# Parse URL to check for tokens/expiration
+from urllib.parse import urlparse, parse_qs
+parsed = urlparse(video_url)
+print(f"\nHost: {parsed.netloc}")
+print(f"Path: {parsed.path}")
+print(f"Query params: {parse_qs(parsed.query)}")
