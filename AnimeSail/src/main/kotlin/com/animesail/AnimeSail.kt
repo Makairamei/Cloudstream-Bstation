@@ -1,9 +1,22 @@
 package com.animesail
 
-import android.util.Base64
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addAniListId
+import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
+import com.lagradost.cloudstream3.mvvm.safeApiCall
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.nicehttp.NiceResponse
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.app
+import kotlin.text.Regex
 
 class AnimeSail : MainAPI() {
     override var mainUrl = "https://154.26.137.28"
@@ -11,92 +24,125 @@ class AnimeSail : MainAPI() {
     override val hasMainPage = true
     override var lang = "id"
     override val hasDownloadSupport = true
-    override val supportedTypes = setOf(TvType.Anime, TvType.Movie, TvType.TvSeries)
 
-    // Cookies untuk bypass Cloudflare
-    private val cookies = mapOf(
-        "_as_turnstile" to "7ca75f267f4baab5b0a7634d930503312176f854567a9d870f3c371af04eefe4",
-        "_as_ipin_ct" to "ID",
-        "_as_ipin_tz" to "Asia/Jakarta",
-        "_as_ipin_lc" to "en-US"
-    )
+    override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
+
+    companion object {
+        fun getType(t: String): TvType {
+            return if (t.contains("OVA", true) || t.contains("Special")) TvType.OVA
+            else if (t.contains("Movie", true)) TvType.AnimeMovie else TvType.Anime
+        }
+
+        fun getStatus(t: String): ShowStatus {
+            return when (t) {
+                "Completed" -> ShowStatus.Completed
+                "Ongoing" -> ShowStatus.Ongoing
+                else -> ShowStatus.Completed
+            }
+        }
+    }
+
+    private suspend fun request(url: String, ref: String? = null): NiceResponse {
+        return app.get(
+            url,
+            headers = mapOf(
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            ),
+            cookies = mapOf(
+                "_as_ipin_ct" to "ID",
+                "_as_ipin_tz" to "Asia/Jakarta",
+                "_as_ipin_lc" to "en-US",
+                "_as_turnstile" to "7ca75f267f4baab5b0a7634d930503312176f854567a9d870f3c371af04eefe4"
+            ),
+            referer = ref
+        )
+    }
 
     override val mainPage = mainPageOf(
-        "$mainUrl/" to "Semua",
-        "$mainUrl/rilisan-anime-terbaru/" to "Anime",
-        "$mainUrl/rilisan-donghua-terbaru/" to "Donghua"
+        "$mainUrl/page/" to "Episode Terbaru",
+        "$mainUrl/movie-terbaru/page/" to "Movie Terbaru",
+        "$mainUrl/rilisan-donghua-terbaru/page/" to "Donghua Terbaru",
+        "$mainUrl/rilisan-anime-terbaru/page/" to "Anime Terbaru",
+        "$mainUrl/genres/action/page/" to "Action",
+        "$mainUrl/genres/adventure/page/" to "Adventure",
+        "$mainUrl/genres/comedy/page/" to "Comedy",
+        "$mainUrl/genres/fantasy/page/" to "Fantasy",
+        "$mainUrl/genres/romance/page/" to "Romance",
+        "$mainUrl/genres/school/page/" to "School",
+        "$mainUrl/genres/supernatural/page/" to "Supernatural"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page > 1) "${request.data}page/$page/" else request.data
-        val document = app.get(url, cookies = cookies).document
-        
-        val items = document.select("article.bs, article.bsz").mapNotNull { el ->
-            val title = el.selectFirst("div.tt h2, .bsx h2")?.text()
-                ?.replace("Subtitle Indonesia", "")?.trim() ?: return@mapNotNull null
-            val href = el.selectFirst("a")?.attr("href") ?: return@mapNotNull null
-            val poster = el.selectFirst("img")?.attr("src")
-            val epText = el.selectFirst("div.tt span, .epx")?.text()
-            
-            newAnimeSearchResponse(title, href, TvType.Anime) {
-                this.posterUrl = poster
-                if (!epText.isNullOrEmpty()) addSub(epText.filter { it.isDigit() }.toIntOrNull())
+        val document = request(request.data + page).document
+        val home = document.select("article").map { it.toSearchResult() }
+        return newHomePageResponse(request.name, home)
+    }
+
+    private fun getProperAnimeLink(uri: String): String {
+        return if (uri.contains("/anime/")) uri
+        else {
+            var title = uri.substringAfter("$mainUrl/")
+            title = when {
+                (title.contains("-episode")) && !(title.contains("-movie")) ->
+                    title.substringBefore("-episode")
+                (title.contains("-movie")) -> title.substringBefore("-movie")
+                else -> title
             }
+            "$mainUrl/anime/$title"
         }
-        
-        return newHomePageResponse(request.name, items)
+    }
+
+    private fun Element.toSearchResult(): AnimeSearchResponse {
+        val href = getProperAnimeLink(fixUrlNull(this.selectFirst("a")?.attr("href")).toString())
+        val title = this.select(".tt > h2").text().trim()
+        val posterUrl = fixUrl(this.selectFirst("div.limit img")?.attr("src") ?: "")
+        val epNum = this.selectFirst(".tt > h2")?.text()?.let {
+            Regex("Episode\\s?(\\d+)").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        }
+        return newAnimeSearchResponse(title, href, TvType.Anime) {
+            this.posterUrl = posterUrl
+            addSub(epNum)
+        }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/?s=$query"
-        val document = app.get(url, cookies = cookies).document
-        
-        return document.select("article.bs").mapNotNull { el ->
-            val title = el.selectFirst("div.tt h2")?.text()
-                ?.replace("Subtitle Indonesia", "")?.trim() ?: return@mapNotNull null
-            val href = el.selectFirst("a")?.attr("href") ?: return@mapNotNull null
-            val poster = el.selectFirst("img")?.attr("src")
-            
-            newAnimeSearchResponse(title, href, TvType.Anime) {
-                this.posterUrl = poster
-            }
-        }
+        val link = "$mainUrl/?s=$query"
+        val document = request(link).document
+        return document.select("div.listupd article").map { it.toSearchResult() }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, cookies = cookies).document
-        
-        // Jika ini halaman episode, ambil link anime parent
-        if (url.contains("-episode-")) {
-            val parentLink = document.selectFirst(".nvs.nvsc a, .names a")?.attr("href")
-            if (parentLink != null && !parentLink.contains("episode")) {
-                return load(parentLink)
+        val document = request(url).document
+        val title = document.selectFirst("h1.entry-title")?.text().toString()
+            .replace("Subtitle Indonesia", "").trim()
+        val poster = document.selectFirst("div.entry-content > img")?.attr("src")
+        val type = getType(document.select("tbody th:contains(Tipe)").next().text().lowercase())
+        val year = document.select("tbody th:contains(Dirilis)").next().text().trim().toIntOrNull()
+
+        val episodes = document.select("ul.daftar > li").mapNotNull { episodeElement ->
+            val anchor = episodeElement.selectFirst("a") ?: return@mapNotNull null
+            val episodeLink = fixUrl(anchor.attr("href"))
+            val episodeName = anchor.text()
+            val episodeNumber = Regex("Episode\\s?(\\d+)")
+                .find(episodeName)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            newEpisode(episodeLink) {
+                this.name = episodeName
+                this.episode = episodeNumber
             }
-        }
-        
-        val title = document.selectFirst("h1.entry-title, .entry-title")?.text()
-            ?.replace("Subtitle Indonesia", "")?.trim() ?: "Unknown"
-        val poster = document.selectFirst("div.thumb img, .lm img")?.attr("src")
-        val description = document.selectFirst("div.entry-content p, .synp p")?.text()
-        val tags = document.select(".genxed a, .spe span:contains(Genre) a").map { it.text() }
-        
-        val episodes = document.select("div.eplister ul li, .lstepx li").mapNotNull { li ->
-            val link = li.selectFirst("a") ?: return@mapNotNull null
-            val epUrl = link.attr("href")
-            val epTitle = link.selectFirst("div.epl-title, .epl-title")?.text() 
-                ?: link.selectFirst(".epl-num")?.text() 
-                ?: link.text()
-            val epNumStr = link.selectFirst("div.epl-num, .epl-num")?.text()
-            val epNum = epNumStr?.filter { it.isDigit() }?.toIntOrNull()
-                ?: epTitle.filter { it.isDigit() }.toIntOrNull()
-            
-            Episode(epUrl, epTitle, episode = epNum)
         }.reversed()
-        
-        return newTvSeriesLoadResponse(title, url, TvType.Anime, episodes) {
-            this.posterUrl = poster
-            this.plot = description
-            this.tags = tags
+
+        val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(type), year, true)
+
+        return newAnimeLoadResponse(title, url, type) {
+            posterUrl = tracker?.image ?: poster
+            backgroundPosterUrl = tracker?.cover
+            this.year = year
+            addEpisodes(DubStatus.Subbed, episodes)
+            showStatus = getStatus(document.select("tbody th:contains(Status)").next().text().trim())
+            plot = document.selectFirst("div.entry-content > p")?.text()
+            this.tags = document.select("tbody th:contains(Genre)").next().select("a").map { it.text() }
+            addMalId(tracker?.malId)
+            addAniListId(tracker?.aniId?.toIntOrNull())
         }
     }
 
@@ -106,85 +152,94 @@ class AnimeSail : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data, cookies = cookies).document
-        
-        // 1. Scan iframe langsung
-        document.select("iframe").forEach { iframe ->
-            val src = iframe.attr("src")
-            if (src.isNotEmpty()) {
-                loadVideoUrl(src, callback, subtitleCallback)
-            }
-        }
-        
-        // 2. Scan select option dengan data-em (hidden video sources)
-        document.select("select.mirror option, .player-selector option").forEach { option ->
-            val dataEm = option.attr("data-em")
-            val dataDefault = option.attr("data-default")
-            val dataContent = option.attr("data-content")
-            
-            listOf(dataEm, dataDefault, dataContent).forEach { encoded ->
-                if (encoded.isNotEmpty()) {
-                    tryDecodeAndLoad(encoded, callback, subtitleCallback)
+        val document = request(data).document
+
+        coroutineScope {
+            val jobs = document.select(".mobius > .mirror > option").map { element ->
+                async {
+                    safeApiCall {
+                        val iframe = fixUrl(
+                            Jsoup.parse(base64Decode(element.attr("data-em")))
+                                .select("iframe").attr("src")
+                        )
+                        val quality = getIndexQuality(element.text())
+
+                        when {
+                            iframe.startsWith("$mainUrl/utils/player/arch/") ||
+                                    iframe.startsWith("$mainUrl/utils/player/race/") ->
+                                request(iframe, ref = data).document.select("source").attr("src").let { link ->
+                                    val source = when {
+                                        iframe.contains("/arch/") -> "Arch"
+                                        iframe.contains("/race/") -> "Race"
+                                        else -> this@AnimeSail.name
+                                    }
+                                    callback.invoke(
+                                        ExtractorLink(
+                                            source = source,
+                                            name = source,
+                                            url = link,
+                                            referer = mainUrl,
+                                            quality = getIndexQuality(element.text()),
+                                            type = ExtractorLinkType.VIDEO
+                                        )
+                                    )
+                                }
+
+                            iframe.startsWith("https://aghanim.xyz/tools/redirect/") -> {
+                                val link =
+                                    "https://rasa-cintaku-semakin-berantai.xyz/v/${
+                                        iframe.substringAfter("id=").substringBefore("&token")
+                                    }"
+                                loadFixedExtractor(link, quality, mainUrl, subtitleCallback, callback)
+                            }
+
+                            iframe.startsWith("$mainUrl/utils/player/framezilla/") ||
+                                    iframe.startsWith("https://uservideo.xyz") -> {
+                                request(iframe, ref = data).document.select("iframe").attr("src").let { link ->
+                                    loadFixedExtractor(fixUrl(link), quality, mainUrl, subtitleCallback, callback)
+                                }
+                            }
+
+                            else -> {
+                                loadFixedExtractor(iframe, quality, mainUrl, subtitleCallback, callback)
+                            }
+                        }
+                    }
                 }
             }
+            jobs.awaitAll()
         }
-        
-        // 3. Scan semua element dengan data attributes
-        document.select("[data-em], [data-default], [data-content]").forEach { el ->
-            listOf(
-                el.attr("data-em"),
-                el.attr("data-default"),
-                el.attr("data-content")
-            ).forEach { encoded ->
-                if (encoded.isNotEmpty()) {
-                    tryDecodeAndLoad(encoded, callback, subtitleCallback)
-                }
-            }
-        }
-        
+
         return true
     }
-    
-    private suspend fun tryDecodeAndLoad(
-        encoded: String,
-        callback: (ExtractorLink) -> Unit,
-        subtitleCallback: (SubtitleFile) -> Unit
-    ) {
-        try {
-            // Jika sudah URL langsung
-            if (encoded.startsWith("http")) {
-                loadVideoUrl(encoded, callback, subtitleCallback)
-                return
-            }
-            
-            // Decode Base64
-            val decoded = String(Base64.decode(encoded, Base64.DEFAULT))
-            
-            // Cari src dari iframe tag
-            val iframeSrc = Regex("""src=["']([^"']+)["']""").find(decoded)?.groupValues?.get(1)
-            if (iframeSrc != null) {
-                loadVideoUrl(iframeSrc, callback, subtitleCallback)
-                return
-            }
-            
-            // Jika decoded adalah URL langsung
-            if (decoded.startsWith("http") || decoded.startsWith("//")) {
-                loadVideoUrl(decoded, callback, subtitleCallback)
-            }
-        } catch (_: Exception) {}
+
+    private fun getIndexQuality(str: String?): Int {
+        return Regex("(\\d{3,4})[pP]").find(str ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: Qualities.Unknown.value
     }
-    
-    private suspend fun loadVideoUrl(
+
+    private suspend fun loadFixedExtractor(
         url: String,
-        callback: (ExtractorLink) -> Unit,
-        subtitleCallback: (SubtitleFile) -> Unit
+        quality: Int,
+        referer: String? = null,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
     ) {
-        var finalUrl = url.trim()
-        if (finalUrl.startsWith("//")) finalUrl = "https:$finalUrl"
-        if (finalUrl.startsWith("/")) finalUrl = "$mainUrl$finalUrl"
-        
-        if (finalUrl.startsWith("http")) {
-            loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
+        loadExtractor(url, referer, subtitleCallback) { link ->
+            CoroutineScope(Dispatchers.IO).launch {
+                callback.invoke(
+                    ExtractorLink(
+                        source = name,
+                        name = name,
+                        url = link.url,
+                        referer = link.referer,
+                        quality = link.quality,
+                        type = link.type,
+                        extractorData = link.extractorData,
+                        headers = link.headers
+                    )
+                )
+            }
         }
     }
 }
